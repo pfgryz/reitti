@@ -13,6 +13,20 @@ services:
       - POSTGRES_DB=Reitti
     volumes:
       - postgis:/var/lib/postgresql
+  graphhopper:
+    image: israelhikingmap/graphhopper:11.0
+    restart: unless-stopped
+    container_name: "graphhopper"
+    ports:
+      - "8990:8990"
+      - "8989:8989"
+    volumes:
+      - ./data/containers/graphhopper:/data
+      - ./data/containers/graphhopper-config.yaml:/config.yml 
+    command: >
+      -c /config.yml
+    environment:
+      - JAVA_OPTS=-Xmx2g -Xms2g
 
 volumes:
   postgis:

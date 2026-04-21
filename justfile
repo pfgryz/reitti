@@ -22,6 +22,15 @@ prepare-gtfs:
 prepare-data: (prepare-gtfs)
 
 
+# == CONTAINERS ==
+
+prepare-graphhopper:
+    echo "Preparing GraphHopper data..."
+    mkdir -p data/containers/graphhopper
+    cp data/raw/hsl.osm.pbf data/containers/graphhopper/hsl.osm.pbf
+    cp resources/graphhopper-config.yaml data/containers/graphhopper-config.yaml
+    echo "GraphHopper data prepared successfully"
+
 # === SETUP ===
 
 _init: 
@@ -29,5 +38,8 @@ _init:
     mkdir -p data
     mkdir -p data/containers
 
-setup: (_init) (download-data) (prepare-data) 
+setup: (_init) (download-data) (prepare-data) (prepare-graphhopper)
     echo "Project initialized successfully"
+
+run:
+    docker compose up -d
