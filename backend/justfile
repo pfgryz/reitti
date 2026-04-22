@@ -1,0 +1,7 @@
+# === SERVER ===
+
+dev-server:
+    uv run fastapi dev main.py
+
+server:
+    uv run fastapi run main.py
