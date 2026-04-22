@@ -755,10 +755,14 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastapi", extras = ["standard"], specifier = ">=0.136.0" }]
+requires-dist = [
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.136.0" },
+    { name = "pydantic", specifier = ">=2.13.3" },
+]
 
 [[package]]
 name = "rich"
