@@ -13,6 +13,7 @@ services:
       - POSTGRES_DB=Reitti
     volumes:
       - postgis:/var/lib/postgresql
+      - ./data/gtfs:/gtfs
   graphhopper:
     image: israelhikingmap/graphhopper:11.0
     restart: unless-stopped

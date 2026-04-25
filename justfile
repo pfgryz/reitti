@@ -31,6 +31,13 @@ prepare-graphhopper:
     cp resources/graphhopper-config.yaml data/containers/graphhopper-config.yaml
     echo "GraphHopper data prepared successfully"
 
+prepare-postgis:
+    echo "Preparing PostGIS data..."
+    docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/0_init_db.sql
+    docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/1_load_data.sql
+    docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/2_init_geom.sql
+    echo "PostGIS data prepared successfully"
+
 # === SETUP ===
 
 _init: 
