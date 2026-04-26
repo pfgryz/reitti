@@ -5,6 +5,7 @@ description = "API server for the Reitti project"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "asyncpg>=0.31.0",
     "fastapi[standard]>=0.136.0",
     "pydantic>=2.13.3",
 ]
