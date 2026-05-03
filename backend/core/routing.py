@@ -29,7 +29,9 @@ class Path(TypedDict):
     time: float
 
 
-def best_path_by(data: dict[str, Any], f: Callable[str, float]) -> Optional[Path]:
+def best_path_by(
+    data: dict[str, Any], criterion: Callable[dict, float]
+) -> Optional[Path]:
     if not (paths := data.get("paths")) or not isinstance(paths, list):
         raise RoutingError("GraphHopper response is empty")
 
@@ -39,8 +41,8 @@ def best_path_by(data: dict[str, Any], f: Callable[str, float]) -> Optional[Path
         if not isinstance(path, dict):
             raise RoutingError("GraphHopper path entry is not an object")
 
-        value = f(path)
-        if best_path is None or value > f(best_path):
+        value = criterion(path)
+        if best_path is None or value > criterion(best_path):
             best_path = path
 
     return best_path
@@ -81,5 +83,5 @@ async def calculate_route_between(
     path = (
         get_shortest_path(data) if profile == EProfile.Foot else get_fastest_path(data)
     )
-    print(path)
+
     return RouteSummary(distance=path.get("distance"), time=path.get("time") / 1000)

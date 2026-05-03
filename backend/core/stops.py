@@ -29,4 +29,29 @@ async def get_nearest_stops(db: Pool, point: Point, count: int = 10) -> list[Sto
         point.lat,
         count,
     )
+
+    return [Stop(name=row["name"], lat=row["lat"], lon=row["lon"]) for row in rows]
+
+
+async def get_nearest_stops_in_radius(
+    db: Pool, point: Point, radius: float, count: int = 10
+) -> list[Stop]:
+    rows = await db.fetch(
+        """
+        SELECT  
+            stop_name AS name,
+            stop_lat as lat,
+            stop_lon as lon
+        FROM hsl.stops
+        WHERE geom IS NOT NULL
+        AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3)
+        ORDER BY ST_Distance(geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) ASC
+        LIMIT $4
+        """,
+        point.lon,
+        point.lat,
+        radius,
+        count,
+    )
+
     return [Stop(name=row["name"], lat=row["lat"], lon=row["lon"]) for row in rows]
