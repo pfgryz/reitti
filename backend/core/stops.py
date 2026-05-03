@@ -1,22 +1,24 @@
 from asyncpg import Pool
-from core.routing import Point
 from pydantic import BaseModel
+
+from core import Point
 
 
 class Stop(BaseModel):
+    id: str
     name: str
-    lat: float
-    lon: float
+    point: Point
 
 
-async def get_nearest_stop(db: Pool, lat: float, lon: float) -> Stop:
-    return (await get_nearest_stops(db, lat, lon, count=1))[0]
+async def get_nearest_stop(db: Pool, point: Point) -> Stop:
+    return (await get_nearest_stops(db, point, count=1))[0]
 
 
 async def get_nearest_stops(db: Pool, point: Point, count: int = 10) -> list[Stop]:
     rows = await db.fetch(
         """
         SELECT
+            stop_id AS id,
             stop_name AS name,
             stop_lat AS lat,
             stop_lon AS lon
@@ -30,7 +32,12 @@ async def get_nearest_stops(db: Pool, point: Point, count: int = 10) -> list[Sto
         count,
     )
 
-    return [Stop(name=row["name"], lat=row["lat"], lon=row["lon"]) for row in rows]
+    return [
+        Stop(
+            id=row["id"], name=row["name"], point=Point(lat=row["lat"], lon=row["lon"])
+        )
+        for row in rows
+    ]
 
 
 async def get_nearest_stops_in_radius(
@@ -39,6 +46,7 @@ async def get_nearest_stops_in_radius(
     rows = await db.fetch(
         """
         SELECT  
+            stop_id AS id,
             stop_name AS name,
             stop_lat as lat,
             stop_lon as lon
@@ -54,4 +62,9 @@ async def get_nearest_stops_in_radius(
         count,
     )
 
-    return [Stop(name=row["name"], lat=row["lat"], lon=row["lon"]) for row in rows]
+    return [
+        Stop(
+            id=row["id"], name=row["name"], point=Point(lat=row["lat"], lon=row["lon"])
+        )
+        for row in rows
+    ]

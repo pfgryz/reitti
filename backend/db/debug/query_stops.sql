@@ -1,5 +1,7 @@
 SELECT * FROM hsl.routes LIMIT 5;
 
+SELECT * FROM hsl.trips LIMIT 5;
+
 SELECT stop_id, stop_name, ST_AsText(geom)
 FROM hsl.stops
 LIMIT 5;
