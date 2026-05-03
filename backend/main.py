@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import asyncpg
-from app.routers import stops
+from app.routers import distance, stops
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(distance.router)
 app.include_router(stops.router)
 
 
