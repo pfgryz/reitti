@@ -6,5 +6,5 @@ async def get_db(request: Request):
     return request.app.state.db_pool
 
 
-async def get_client(request: Request):
-    return httpx.AsyncClient(timeout=30.0)
+async def get_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client

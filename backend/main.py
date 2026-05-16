@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import asyncpg
+import httpx
 from app.routers import distance, stops
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -19,10 +20,12 @@ async def lifespan(app: FastAPI):
     app.state.db_pool = await asyncpg.create_pool(
         dsn=database_url, min_size=1, max_size=10
     )
+    app.state.http_client = httpx.AsyncClient(timeout=30.0)
 
     try:
         yield
     finally:
+        await app.state.http_client.aclose()
         await app.state.db_pool.close()
 
 
