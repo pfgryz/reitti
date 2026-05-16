@@ -13,7 +13,10 @@ class RouteCache(Generic[T]):
         if key not in self._store:
             return None
         self._store.move_to_end(key)
-        return self._store[key]
+        value = self._store[key]
+        if hasattr(value, "model_copy"):
+            return value.model_copy()
+        return value
 
     def set(self, key: tuple, value: T) -> None:
         if key in self._store:

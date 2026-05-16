@@ -7,7 +7,7 @@ from pathlib import Path
 import asyncpg
 import httpx
 from app.routers import distance, stops
-from core.exceptions import RouteNotFoundError
+from core.exceptions import ConfigurationError, RouteNotFoundError
 from core.route_cache import RouteCache
 from core.routing import RouteSummary, RoutingError
 from dotenv import load_dotenv
@@ -87,6 +87,14 @@ async def routing_error_handler(_request: Request, exc: RoutingError):
     return JSONResponse(
         status_code=502,
         content={"detail": {"code": "GRAPHHOPPER_ERROR", "message": str(exc)}},
+    )
+
+
+@app.exception_handler(ConfigurationError)
+async def configuration_error_handler(_request: Request, exc: ConfigurationError):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {"code": "CONFIGURATION_ERROR", "message": exc.message}},
     )
 
 

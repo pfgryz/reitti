@@ -44,8 +44,6 @@ async def get_average_trips_between_stops_groups(
             INNER JOIN hsl.stop_times st_to
                 ON st_from.trip_id = st_to.trip_id
                 AND st_from.stop_sequence < st_to.stop_sequence
-            INNER JOIN hsl.trips t ON t.trip_id = st_from.trip_id
-            INNER JOIN hsl.routes r ON r.route_id = t.route_id
             WHERE st_from.stop_id = ANY($1::text[])
                 AND st_to.stop_id = ANY($2::text[])
                 AND st_from.departure_time ~ '^[0-9]+:[0-9]{{2}}:[0-9]{{2}}$'
@@ -68,9 +66,9 @@ async def get_average_trips_between_stops_groups(
 
     result: list[StopsTrip] = []
     for row in rows:
-        from_id = row.get("from_stop_id")
-        to_id = row.get("to_stop_id")
-        avg_time = row.get("average_travel_time")
+        from_id = row["from_stop_id"]
+        to_id = row["to_stop_id"]
+        avg_time = row["average_travel_time"]
 
         if from_id not in from_stops_ids or to_id not in to_stops_ids:
             continue

@@ -8,7 +8,7 @@ from asyncpg import Pool
 from pydantic import BaseModel
 
 from core import Point
-from core.exceptions import RouteNotFoundCode, RouteNotFoundError
+from core.exceptions import ConfigurationError, RouteNotFoundCode, RouteNotFoundError
 from core.route_cache import RouteCache
 from core.stops import get_nearest_stops_in_radius
 from core.trips import StopsTrip, get_average_trips_between_stops_groups
@@ -56,6 +56,10 @@ def best_path_by(
         if not isinstance(path, dict):
             raise RoutingError("GraphHopper path entry is not an object")
 
+        distance = path.get("distance")
+        if not isinstance(distance, (int, float)):
+            continue
+
         value = criterion(path)
         if best_path is None or value > criterion(best_path):
             best_path = path
@@ -67,7 +71,7 @@ def best_path_by(
 
 
 def get_shortest_path(data: dict[str, Any]) -> Path:
-    return best_path_by(data, lambda p: -(p.get("distance") or 0))
+    return best_path_by(data, lambda p: -float(p["distance"]))
 
 
 def _path_to_route_summary(path: dict[str, Any]) -> RouteSummary:
@@ -220,7 +224,7 @@ async def calculate_public_transport_route_between(
     cache: RouteCache[RouteSummary] | None = None,
 ) -> RouteSummary:
     if cache is None:
-        raise RuntimeError("Route cache is not configured")
+        raise ConfigurationError("Route cache is not configured")
     route_cache = cache
 
     from_stops = await get_nearest_stops_in_radius(
@@ -263,10 +267,15 @@ async def calculate_public_transport_route_between(
     )
 
     best_route: RouteSummary | None = None
-    pruned_count = 0
+    evaluated_pairs: set[tuple[str, str]] = set()
+    pruned_pairs: set[tuple[str, str]] = set()
 
     for stop_trip in stop_trips:
         pair_key = (stop_trip.from_stop.id, stop_trip.to_stop.id)
+        if pair_key in evaluated_pairs:
+            continue
+        evaluated_pairs.add(pair_key)
+
         legs = foot_legs.get(pair_key)
         if legs is None:
             continue
@@ -275,7 +284,7 @@ async def calculate_public_transport_route_between(
         if _should_prune_leg(access_leg, direct_route) or _should_prune_leg(
             egress_leg, direct_route
         ):
-            pruned_count += 1
+            pruned_pairs.add(pair_key)
             continue
 
         distance = access_leg.distance + egress_leg.distance
@@ -286,7 +295,7 @@ async def calculate_public_transport_route_between(
             best_route = route
 
     if best_route is None:
-        if pruned_count == len(stop_trips):
+        if evaluated_pairs and pruned_pairs == evaluated_pairs:
             raise RouteNotFoundError(
                 RouteNotFoundCode.ALL_CANDIDATES_PRUNED,
                 "All public transport options were discarded because walking to or from stops "

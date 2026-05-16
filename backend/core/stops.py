@@ -11,10 +11,6 @@ class Stop(BaseModel):
     point: Point
 
 
-async def get_nearest_stop(db: Pool, point: Point) -> Stop:
-    return (await get_nearest_stops(db, point, count=1))[0]
-
-
 async def get_nearest_stops(db: Pool, point: Point, count: int = 10) -> list[Stop]:
     rows = await db.fetch(
         """
