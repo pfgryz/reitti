@@ -66,11 +66,23 @@ async def get_average_trips_between_stops_groups(
         limit,
     )
 
-    return [
-        StopsTrip(
-            from_stop=from_stops_ids.get(row.get("from_stop_id")),
-            to_stop=to_stops_ids.get(row.get("to_stop_id")),
-            average_travel_time=row.get("average_travel_time"),
+    result: list[StopsTrip] = []
+    for row in rows:
+        from_id = row.get("from_stop_id")
+        to_id = row.get("to_stop_id")
+        avg_time = row.get("average_travel_time")
+
+        if from_id not in from_stops_ids or to_id not in to_stops_ids:
+            continue
+        if avg_time is None:
+            continue
+
+        result.append(
+            StopsTrip(
+                from_stop=from_stops_ids[from_id],
+                to_stop=to_stops_ids[to_id],
+                average_travel_time=float(avg_time),
+            )
         )
-        for row in rows
-    ]
+
+    return result
