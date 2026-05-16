@@ -7,6 +7,7 @@ from asyncpg import Pool
 from pydantic import BaseModel
 
 from core import Point
+from core.exceptions import RouteNotFoundCode, RouteNotFoundError
 from core.stops import get_nearest_stops_in_radius
 from core.trips import get_average_trips_between_stops_groups
 
@@ -101,14 +102,30 @@ async def calculate_public_transport_route_between(
         radius,
         max_count,
     )
+    if not from_stops:
+        raise RouteNotFoundError(
+            RouteNotFoundCode.NO_STOPS_NEAR_ORIGIN,
+            "No public transport stops found near the origin within the search radius.",
+        )
+
     to_stops = await get_nearest_stops_in_radius(
         db,
         to_point,
         radius,
         max_count,
     )
+    if not to_stops:
+        raise RouteNotFoundError(
+            RouteNotFoundCode.NO_STOPS_NEAR_DESTINATION,
+            "No public transport stops found near the destination within the search radius.",
+        )
 
     stop_trips = await get_average_trips_between_stops_groups(db, from_stops, to_stops)
+    if not stop_trips:
+        raise RouteNotFoundError(
+            RouteNotFoundCode.NO_TRANSIT_LEGS,
+            "No direct transit connections found between nearby stops.",
+        )
 
     best_route = None
 
@@ -131,5 +148,11 @@ async def calculate_public_transport_route_between(
 
         if best_route is None or route.time < best_route.time:
             best_route = route
+
+    if best_route is None:
+        raise RouteNotFoundError(
+            RouteNotFoundCode.NO_VIABLE_ROUTE,
+            "No viable public transport route could be assembled.",
+        )
 
     return best_route

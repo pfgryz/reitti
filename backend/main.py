@@ -5,8 +5,10 @@ from pathlib import Path
 import asyncpg
 import httpx
 from app.routers import distance, stops
+from core.exceptions import RouteNotFoundError
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -32,6 +34,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(distance.router)
 app.include_router(stops.router)
+
+
+@app.exception_handler(RouteNotFoundError)
+async def route_not_found_handler(_request: Request, exc: RouteNotFoundError):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": {"code": exc.code.value, "message": exc.message}},
+    )
 
 
 @app.get("/")
