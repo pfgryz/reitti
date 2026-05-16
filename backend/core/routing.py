@@ -111,8 +111,14 @@ async def calculate_route_between(
             ("profile", profile.value),
         ]
 
-        response = await client.get(url, params=params)
-        response.raise_for_status()
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise RoutingError("GraphHopper unreachable: request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise RoutingError(f"GraphHopper unreachable: {exc}") from exc
+
         data = response.json()
 
         if not isinstance(data, dict):

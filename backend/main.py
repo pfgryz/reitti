@@ -9,7 +9,7 @@ import httpx
 from app.routers import distance, stops
 from core.exceptions import RouteNotFoundError
 from core.route_cache import RouteCache
-from core.routing import RouteSummary
+from core.routing import RouteSummary, RoutingError
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -79,6 +79,14 @@ async def route_not_found_handler(_request: Request, exc: RouteNotFoundError):
     return JSONResponse(
         status_code=404,
         content={"detail": {"code": exc.code.value, "message": exc.message}},
+    )
+
+
+@app.exception_handler(RoutingError)
+async def routing_error_handler(_request: Request, exc: RoutingError):
+    return JSONResponse(
+        status_code=502,
+        content={"detail": {"code": "GRAPHHOPPER_ERROR", "message": str(exc)}},
     )
 
 
