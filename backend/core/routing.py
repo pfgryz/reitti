@@ -101,6 +101,11 @@ async def calculate_route_between(
             return cached
 
     async def _fetch() -> RouteSummary:
+        if cache is not None:
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+
         base_url = os.environ.get("GRAPHHOPPER_BASE_URL", "")
         if not base_url:
             raise RoutingError("GRAPHHOPPER_BASE_URL is not configured")
@@ -151,44 +156,57 @@ async def _fetch_foot_legs(
     cache: RouteCache[RouteSummary],
 ) -> dict[tuple[str, str], tuple[RouteSummary, RouteSummary]]:
     unique_pairs: dict[tuple[str, str], StopsTrip] = {}
+    access_stops: dict[str, Point] = {}
+    egress_stops: dict[str, Point] = {}
+
     for trip in stop_trips:
         pair_key = (trip.from_stop.id, trip.to_stop.id)
         if pair_key not in unique_pairs:
             unique_pairs[pair_key] = trip
+        access_stops.setdefault(trip.from_stop.id, trip.from_stop.point)
+        egress_stops.setdefault(trip.to_stop.id, trip.to_stop.point)
 
     semaphore = asyncio.Semaphore(GRAPHHOPPER_CONCURRENCY)
-    pair_keys = list(unique_pairs.keys())
+
+    access_stop_ids = list(access_stops.keys())
+    egress_stop_ids = list(egress_stops.keys())
 
     access_results = await asyncio.gather(
         *[
             calculate_route_between(
                 client,
                 from_point,
-                unique_pairs[key].from_stop.point,
+                access_stops[stop_id],
                 EProfile.Foot,
                 cache,
                 semaphore,
             )
-            for key in pair_keys
+            for stop_id in access_stop_ids
         ]
     )
     egress_results = await asyncio.gather(
         *[
             calculate_route_between(
                 client,
-                unique_pairs[key].to_stop.point,
+                egress_stops[stop_id],
                 to_point,
                 EProfile.Foot,
                 cache,
                 semaphore,
             )
-            for key in pair_keys
+            for stop_id in egress_stop_ids
         ]
     )
 
+    access_by_stop = dict(zip(access_stop_ids, access_results))
+    egress_by_stop = dict(zip(egress_stop_ids, egress_results))
+
     return {
-        pair_keys[i]: (access_results[i], egress_results[i])
-        for i in range(len(pair_keys))
+        pair_key: (
+            access_by_stop[trip.from_stop.id],
+            egress_by_stop[trip.to_stop.id],
+        )
+        for pair_key, trip in unique_pairs.items()
     }
 
 
@@ -201,7 +219,9 @@ async def calculate_public_transport_route_between(
     max_count: int,
     cache: RouteCache[RouteSummary] | None = None,
 ) -> RouteSummary:
-    route_cache = cache if cache is not None else RouteCache[RouteSummary]()
+    if cache is None:
+        raise RuntimeError("Route cache is not configured")
+    route_cache = cache
 
     from_stops = await get_nearest_stops_in_radius(
         db,
