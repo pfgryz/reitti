@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +15,21 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 load_dotenv(Path(__file__).with_name(".env"))
+
+logger = logging.getLogger("uvicorn.access")
+
+
+def _client_addr(request: Request) -> str:
+    if request.client is None:
+        return "-"
+    return f"{request.client.host}:{request.client.port}"
+
+
+def _request_target(request: Request) -> str:
+    path = request.url.path
+    if request.url.query:
+        path = f"{path}?{request.url.query}"
+    return path
 
 
 @asynccontextmanager
@@ -37,6 +54,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(distance.router)
 app.include_router(stops.router)
+
+
+@app.middleware("http")
+async def log_request_duration(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    http_version = request.scope.get("http_version", "1.1")
+    logger.info(
+        '%s - "%s %s HTTP/%s" %s %.2fms',
+        _client_addr(request),
+        request.method,
+        _request_target(request),
+        http_version,
+        response.status_code,
+        duration_ms,
+    )
+    return response
 
 
 @app.exception_handler(RouteNotFoundError)
