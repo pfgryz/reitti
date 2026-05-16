@@ -5,7 +5,7 @@ T = TypeVar("T")
 
 
 class RouteCache(Generic[T]):
-    def __init__(self, max_size: int = 2000) -> None:
+    def __init__(self, max_size: int = 100000) -> None:
         self._max_size = max_size
         self._store: OrderedDict[tuple, T] = OrderedDict()
 

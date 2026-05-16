@@ -44,6 +44,20 @@ def _cache_key(profile: EProfile, from_point: Point, to_point: Point) -> tuple:
     )
 
 
+def _public_transport_cache_key(
+    from_point: Point, to_point: Point, radius: float, max_count: int
+) -> tuple:
+    return (
+        "public-transport",
+        round(from_point.lat, 5),
+        round(from_point.lon, 5),
+        round(to_point.lat, 5),
+        round(to_point.lon, 5),
+        round(radius, 1),
+        max_count,
+    )
+
+
 def best_path_by(
     data: dict[str, Any], criterion: Callable[[dict], float]
 ) -> Path:
@@ -227,6 +241,11 @@ async def calculate_public_transport_route_between(
         raise ConfigurationError("Route cache is not configured")
     route_cache = cache
 
+    pt_key = _public_transport_cache_key(from_point, to_point, radius, max_count)
+    cached_route = route_cache.get(pt_key)
+    if cached_route is not None:
+        return cached_route
+
     from_stops = await get_nearest_stops_in_radius(
         db,
         from_point,
@@ -306,4 +325,5 @@ async def calculate_public_transport_route_between(
             "No viable public transport route could be assembled.",
         )
 
+    route_cache.set(pt_key, best_route)
     return best_route
