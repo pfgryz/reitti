@@ -46,7 +46,7 @@ def _cache_key(profile: EProfile, from_point: Point, to_point: Point) -> tuple:
 
 def best_path_by(
     data: dict[str, Any], criterion: Callable[[dict], float]
-) -> Path | None:
+) -> Path:
     if not (paths := data.get("paths")) or not isinstance(paths, list):
         raise RoutingError("GraphHopper response is empty")
 
@@ -60,19 +60,17 @@ def best_path_by(
         if best_path is None or value > criterion(best_path):
             best_path = path
 
+    if best_path is None:
+        raise RoutingError("No valid path in GraphHopper response")
+
     return best_path
 
 
 def get_shortest_path(data: dict[str, Any]) -> Path:
-    path = best_path_by(data, lambda p: -(p.get("distance") or 0))
-
-    if path is None:
-        raise RoutingError("No valid path in GraphHopper response")
-
-    return path
+    return best_path_by(data, lambda p: -(p.get("distance") or 0))
 
 
-def _path_to_route_summary(path: Path) -> RouteSummary:
+def _path_to_route_summary(path: dict[str, Any]) -> RouteSummary:
     distance = path.get("distance")
     time_ms = path.get("time")
 
@@ -82,7 +80,10 @@ def _path_to_route_summary(path: Path) -> RouteSummary:
     if not isinstance(distance, (int, float)) or not isinstance(time_ms, (int, float)):
         raise RoutingError("GraphHopper path distance or time is not numeric")
 
-    return RouteSummary(distance=float(distance), time=float(time_ms) / 1000)
+    return RouteSummary(
+        distance=float(distance),
+        time=float(time_ms) / 1000,
+    )
 
 
 async def calculate_route_between(
