@@ -2,6 +2,7 @@ from asyncpg import Pool
 from pydantic import BaseModel
 
 from core import Point
+from core.exceptions import RouteNotFoundCode, RouteNotFoundError
 
 
 class Stop(BaseModel):
@@ -31,6 +32,12 @@ async def get_nearest_stops(db: Pool, point: Point, count: int = 10) -> list[Sto
         point.lat,
         count,
     )
+
+    if not rows:
+        raise RouteNotFoundError(
+            RouteNotFoundCode.NO_STOPS_FOUND,
+            "No stops with geometry found near the given location.",
+        )
 
     return [
         Stop(
