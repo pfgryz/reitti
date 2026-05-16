@@ -9,8 +9,9 @@ from pydantic import BaseModel
 
 from core import Point
 from core.exceptions import ConfigurationError, RouteNotFoundCode, RouteNotFoundError
+from core.geo import haversine_distance_m
 from core.route_cache import RouteCache
-from core.stops import get_nearest_stops_in_radius
+from core.stops import Stop, get_nearest_stops_in_radius
 from core.trips import StopsTrip, get_average_trips_between_stops_groups
 
 GRAPHHOPPER_CONCURRENCY = 10
@@ -166,12 +167,24 @@ def _should_prune_leg(leg: RouteSummary, direct: RouteSummary) -> bool:
     return leg.distance > direct.distance or leg.time > direct.time
 
 
+def _filter_stops_by_direct_route(
+    stops: list[Stop], anchor: Point, direct_route: RouteSummary
+) -> list[Stop]:
+    max_m = direct_route.distance
+    return [
+        stop
+        for stop in stops
+        if haversine_distance_m(anchor, stop.point) <= max_m
+    ]
+
+
 async def _fetch_foot_legs(
     client: httpx.AsyncClient,
     from_point: Point,
     to_point: Point,
     stop_trips: list[StopsTrip],
     cache: RouteCache[RouteSummary],
+    direct_route: RouteSummary,
 ) -> dict[tuple[str, str], tuple[RouteSummary, RouteSummary]]:
     unique_pairs: dict[tuple[str, str], StopsTrip] = {}
     access_stops: dict[str, Point] = {}
@@ -184,7 +197,22 @@ async def _fetch_foot_legs(
         access_stops.setdefault(trip.from_stop.id, trip.from_stop.point)
         egress_stops.setdefault(trip.to_stop.id, trip.to_stop.point)
 
+    max_m = direct_route.distance
+    access_stops = {
+        stop_id: point
+        for stop_id, point in access_stops.items()
+        if haversine_distance_m(from_point, point) <= max_m
+    }
+    egress_stops = {
+        stop_id: point
+        for stop_id, point in egress_stops.items()
+        if haversine_distance_m(point, to_point) <= max_m
+    }
+
     semaphore = asyncio.Semaphore(GRAPHHOPPER_CONCURRENCY)
+
+    if not access_stops or not egress_stops:
+        return {}
 
     access_stop_ids = list(access_stops.keys())
     egress_stop_ids = list(egress_stops.keys())
@@ -246,24 +274,24 @@ async def calculate_public_transport_route_between(
     if cached_route is not None:
         return cached_route
 
-    from_stops = await get_nearest_stops_in_radius(
-        db,
-        from_point,
-        radius,
-        max_count,
+    from_stops, to_stops = await asyncio.gather(
+        get_nearest_stops_in_radius(db, from_point, radius, max_count),
+        get_nearest_stops_in_radius(db, to_point, radius, max_count),
     )
+
+    direct_route = await calculate_route_between(
+        client, from_point, to_point, EProfile.Foot, route_cache
+    )
+
+    from_stops = _filter_stops_by_direct_route(from_stops, from_point, direct_route)
+    to_stops = _filter_stops_by_direct_route(to_stops, to_point, direct_route)
+
     if not from_stops:
         raise RouteNotFoundError(
             RouteNotFoundCode.NO_STOPS_NEAR_ORIGIN,
             "No public transport stops found near the origin within the search radius.",
         )
 
-    to_stops = await get_nearest_stops_in_radius(
-        db,
-        to_point,
-        radius,
-        max_count,
-    )
     if not to_stops:
         raise RouteNotFoundError(
             RouteNotFoundCode.NO_STOPS_NEAR_DESTINATION,
@@ -277,12 +305,8 @@ async def calculate_public_transport_route_between(
             "No direct transit connections found between nearby stops.",
         )
 
-    direct_route = await calculate_route_between(
-        client, from_point, to_point, EProfile.Foot, route_cache
-    )
-
     foot_legs = await _fetch_foot_legs(
-        client, from_point, to_point, stop_trips, route_cache
+        client, from_point, to_point, stop_trips, route_cache, direct_route
     )
 
     best_route: RouteSummary | None = None
