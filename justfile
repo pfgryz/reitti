@@ -36,6 +36,7 @@ prepare-postgis:
     docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/0_init_db.sql
     docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/1_load_data.sql
     docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/2_init_geom.sql
+    docker compose exec -T db psql -U admin -d Reitti -f /dev/stdin < backend/db/migrations/3_stop_times_indexes.sql
     echo "PostGIS data prepared successfully"
 
 # === SETUP ===

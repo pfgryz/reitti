@@ -3,7 +3,7 @@ export PYTHONDONTWRITEBYTECODE := "1"
 # === SERVER ===
 
 dev-server:
-    uv run fastapi dev main.py --no-access-log
+    uv run fastapi dev main.py
 
 server:
-    uv run fastapi run main.py --no-access-log
+    uv run fastapi run main.py
