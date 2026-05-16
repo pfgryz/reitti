@@ -1,6 +1,7 @@
+import asyncio
 import os
 from enum import Enum
-from typing import Any, Callable, Optional, TypedDict
+from typing import Any, Callable, TypedDict
 
 import httpx
 from asyncpg import Pool
@@ -8,8 +9,11 @@ from pydantic import BaseModel
 
 from core import Point
 from core.exceptions import RouteNotFoundCode, RouteNotFoundError
+from core.route_cache import RouteCache
 from core.stops import get_nearest_stops_in_radius
-from core.trips import get_average_trips_between_stops_groups
+from core.trips import StopsTrip, get_average_trips_between_stops_groups
+
+GRAPHHOPPER_CONCURRENCY = 10
 
 
 class EProfile(Enum):
@@ -30,9 +34,19 @@ class Path(TypedDict):
     time: float
 
 
+def _cache_key(profile: EProfile, from_point: Point, to_point: Point) -> tuple:
+    return (
+        profile.value,
+        round(from_point.lat, 5),
+        round(from_point.lon, 5),
+        round(to_point.lat, 5),
+        round(to_point.lon, 5),
+    )
+
+
 def best_path_by(
-    data: dict[str, Any], criterion: Callable[dict, float]
-) -> Optional[Path]:
+    data: dict[str, Any], criterion: Callable[[dict], float]
+) -> Path | None:
     if not (paths := data.get("paths")) or not isinstance(paths, list):
         raise RoutingError("GraphHopper response is empty")
 
@@ -50,11 +64,25 @@ def best_path_by(
 
 
 def get_shortest_path(data: dict[str, Any]) -> Path:
-    return best_path_by(data, lambda path: -path.get("distance"))
+    path = best_path_by(data, lambda p: -(p.get("distance") or 0))
+
+    if path is None:
+        raise RoutingError("No valid path in GraphHopper response")
+
+    return path
 
 
-def get_fastest_path(data: dict[str, Any]) -> Path:
-    return best_path_by(data, lambda path: -path.get("time"))
+def _path_to_route_summary(path: Path) -> RouteSummary:
+    distance = path.get("distance")
+    time_ms = path.get("time")
+
+    if distance is None or time_ms is None:
+        raise RoutingError("GraphHopper path is missing distance or time")
+
+    if not isinstance(distance, (int, float)) or not isinstance(time_ms, (int, float)):
+        raise RoutingError("GraphHopper path distance or time is not numeric")
+
+    return RouteSummary(distance=float(distance), time=float(time_ms) / 1000)
 
 
 async def calculate_route_between(
@@ -62,30 +90,99 @@ async def calculate_route_between(
     from_point: Point,
     to_point: Point,
     profile: EProfile,
+    cache: RouteCache[RouteSummary] | None = None,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> RouteSummary:
-    url = f"{os.environ.get('GRAPHHOPPER_BASE_URL', '')}/route"
+    key = _cache_key(profile, from_point, to_point)
+    if cache is not None:
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
 
-    params: list[tuple[str, str]] = [
-        ("point", f"{from_point.lat},{from_point.lon}"),
-        ("point", f"{to_point.lat},{to_point.lon}"),
-        ("profile", profile.value),
-    ]
+    async def _fetch() -> RouteSummary:
+        base_url = os.environ.get("GRAPHHOPPER_BASE_URL", "")
+        if not base_url:
+            raise RoutingError("GRAPHHOPPER_BASE_URL is not configured")
 
-    response = await client.get(url, params=params)
-    response.raise_for_status()
-    data = response.json()
+        url = f"{base_url}/route"
+        params: list[tuple[str, str]] = [
+            ("point", f"{from_point.lat},{from_point.lon}"),
+            ("point", f"{to_point.lat},{to_point.lon}"),
+            ("profile", profile.value),
+        ]
 
-    if not isinstance(data, dict):
-        raise RoutingError("GraphHopper returned a non-object JSON body")
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
 
-    if msg := data.get("message") and not data.get("paths"):
-        raise RoutingError(str(msg))
+        if not isinstance(data, dict):
+            raise RoutingError("GraphHopper returned a non-object JSON body")
 
-    path = (
-        get_shortest_path(data) if profile == EProfile.Foot else get_fastest_path(data)
+        if msg := data.get("message") and not data.get("paths"):
+            raise RoutingError(str(msg))
+
+        route = _path_to_route_summary(get_shortest_path(data))
+        if cache is not None:
+            cache.set(key, route)
+        return route
+
+    if semaphore is not None:
+        async with semaphore:
+            return await _fetch()
+    return await _fetch()
+
+
+def _should_prune_leg(leg: RouteSummary, direct: RouteSummary) -> bool:
+    return leg.distance > direct.distance or leg.time > direct.time
+
+
+async def _fetch_foot_legs(
+    client: httpx.AsyncClient,
+    from_point: Point,
+    to_point: Point,
+    stop_trips: list[StopsTrip],
+    cache: RouteCache[RouteSummary],
+) -> dict[tuple[str, str], tuple[RouteSummary, RouteSummary]]:
+    unique_pairs: dict[tuple[str, str], StopsTrip] = {}
+    for trip in stop_trips:
+        pair_key = (trip.from_stop.id, trip.to_stop.id)
+        if pair_key not in unique_pairs:
+            unique_pairs[pair_key] = trip
+
+    semaphore = asyncio.Semaphore(GRAPHHOPPER_CONCURRENCY)
+    pair_keys = list(unique_pairs.keys())
+
+    access_results = await asyncio.gather(
+        *[
+            calculate_route_between(
+                client,
+                from_point,
+                unique_pairs[key].from_stop.point,
+                EProfile.Foot,
+                cache,
+                semaphore,
+            )
+            for key in pair_keys
+        ]
+    )
+    egress_results = await asyncio.gather(
+        *[
+            calculate_route_between(
+                client,
+                unique_pairs[key].to_stop.point,
+                to_point,
+                EProfile.Foot,
+                cache,
+                semaphore,
+            )
+            for key in pair_keys
+        ]
     )
 
-    return RouteSummary(distance=path.get("distance"), time=path.get("time") / 1000)
+    return {
+        pair_keys[i]: (access_results[i], egress_results[i])
+        for i in range(len(pair_keys))
+    }
 
 
 async def calculate_public_transport_route_between(
@@ -95,7 +192,10 @@ async def calculate_public_transport_route_between(
     to_point: Point,
     radius: float,
     max_count: int,
+    cache: RouteCache[RouteSummary] | None = None,
 ) -> RouteSummary:
+    route_cache = cache if cache is not None else RouteCache[RouteSummary]()
+
     from_stops = await get_nearest_stops_in_radius(
         db,
         from_point,
@@ -127,29 +227,44 @@ async def calculate_public_transport_route_between(
             "No direct transit connections found between nearby stops.",
         )
 
-    best_route = None
+    direct_route = await calculate_route_between(
+        client, from_point, to_point, EProfile.Foot, route_cache
+    )
+
+    foot_legs = await _fetch_foot_legs(
+        client, from_point, to_point, stop_trips, route_cache
+    )
+
+    best_route: RouteSummary | None = None
+    pruned_count = 0
 
     for stop_trip in stop_trips:
-        from_point_to_enter_stop = await calculate_route_between(
-            client, from_point, stop_trip.from_stop.point, EProfile.Foot
-        )
-        exit_stop_to_end_point = await calculate_route_between(
-            client, stop_trip.to_stop.point, to_point, EProfile.Foot
-        )
+        pair_key = (stop_trip.from_stop.id, stop_trip.to_stop.id)
+        legs = foot_legs.get(pair_key)
+        if legs is None:
+            continue
 
-        distance = from_point_to_enter_stop.distance + exit_stop_to_end_point.distance
-        time = (
-            from_point_to_enter_stop.time
-            + stop_trip.average_travel_time
-            + exit_stop_to_end_point.time
-        )
+        access_leg, egress_leg = legs
+        if _should_prune_leg(access_leg, direct_route) or _should_prune_leg(
+            egress_leg, direct_route
+        ):
+            pruned_count += 1
+            continue
 
+        distance = access_leg.distance + egress_leg.distance
+        time = access_leg.time + stop_trip.average_travel_time + egress_leg.time
         route = RouteSummary(distance=distance, time=time)
 
         if best_route is None or route.time < best_route.time:
             best_route = route
 
     if best_route is None:
+        if pruned_count == len(stop_trips):
+            raise RouteNotFoundError(
+                RouteNotFoundCode.ALL_CANDIDATES_PRUNED,
+                "All public transport options were discarded because walking to or from stops "
+                "exceeds the direct walking route.",
+            )
         raise RouteNotFoundError(
             RouteNotFoundCode.NO_VIABLE_ROUTE,
             "No viable public transport route could be assembled.",

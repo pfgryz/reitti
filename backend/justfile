@@ -1,4 +1,4 @@
-set export PYTHONDONTWRITEBYTECODE := "1"
+export PYTHONDONTWRITEBYTECODE := "1"
 
 # === SERVER ===
 

@@ -6,6 +6,8 @@ import asyncpg
 import httpx
 from app.routers import distance, stops
 from core.exceptions import RouteNotFoundError
+from core.route_cache import RouteCache
+from core.routing import RouteSummary
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -23,6 +25,7 @@ async def lifespan(app: FastAPI):
         dsn=database_url, min_size=1, max_size=10
     )
     app.state.http_client = httpx.AsyncClient(timeout=30.0)
+    app.state.route_cache: RouteCache[RouteSummary] = RouteCache()
 
     try:
         yield
