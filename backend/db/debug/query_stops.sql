@@ -10,3 +10,4 @@ SELECT COUNT(1) FROM hsl.routes;
 SELECT COUNT(1) FROM hsl.trips;
 SELECT COUNT(1) FROM hsl.stops;
 SELECT COUNT(1) FROM hsl.stop_times;
+SELECT COUNT(1) FROM hsl.stop_pair_avg_time;
