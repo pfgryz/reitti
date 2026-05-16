@@ -36,7 +36,10 @@ async def get_average_trips_between_stops_groups(
             SELECT
                 st_from.stop_id AS from_stop_id,
                 st_to.stop_id AS to_stop_id,
-                {arr_sec} - {dep_sec} AS duration_seconds
+                CASE
+                    WHEN {arr_sec} >= {dep_sec} THEN {arr_sec} - {dep_sec}
+                    ELSE {arr_sec} + 86400 - {dep_sec}
+                END AS duration_seconds
             FROM hsl.stop_times st_from
             INNER JOIN hsl.stop_times st_to
                 ON st_from.trip_id = st_to.trip_id
