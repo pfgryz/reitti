@@ -119,9 +119,7 @@ def create_travel_matrices(
             pt = await public_transport_legs.get(i, j)
         except RouteNotFoundError:
             return foot
-        if foot.time <= pt.time:
-            return TravelLeg(time=foot.time, distance=foot.distance)
-        return TravelLeg(time=pt.time, distance=pt.distance)
+        return select_optimal_leg(foot, pt)
 
     optimal_legs = AsyncLazyMatrix(n, fetch_optimal_leg)
     return TravelMatrices(
@@ -134,6 +132,14 @@ def create_travel_matrices(
         travel_time=AsyncMatrixFieldView(optimal_legs, "time"),
         walk_dist=AsyncMatrixFieldView(optimal_legs, "distance"),
     )
+
+
+def select_optimal_leg(foot: TravelLeg, pt: TravelLeg | None) -> TravelLeg:
+    if pt is None:
+        return foot
+    if foot.time <= pt.time:
+        return TravelLeg(time=foot.time, distance=foot.distance)
+    return TravelLeg(time=pt.time, distance=pt.distance)
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,3 +7,11 @@ dev-server:
 
 server:
     uv run fastapi run main.py
+
+# === TESTS ===
+
+test:
+    uv run --group dev pytest -v
+
+test-route-optimizer:
+    uv run --group dev pytest -v tests/test_route_optimizer.py tests/test_lazy_matrix.py
