@@ -1,101 +1,239 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from core import Point
+from core.exceptions import RouteNotFoundCode, RouteNotFoundError
+from core.lazy_matrix import AsyncLazyMatrix, AsyncMatrixFieldView
 from core.route_cache import RouteCache
 from core.route_optimizer import (
+    BETA,
     Attraction,
     AttractionType,
+    HeuristicMode,
     OpeningHours,
+    RouteOptimizationError,
+    RouteOptimizationInput,
+    SearchNode,
     StayBounds,
+    StaySelectionMode,
     TravelLeg,
+    TravelMatrices,
+    VisitDecision,
+    cached_mst_weight,
     create_travel_matrices,
+    h_stay,
+    mst_weight,
+    optimize_route,
+    passes_pruning,
     select_optimal_leg,
+    stay_options,
+    trip_end,
+    validate_preliminary_feasibility,
 )
-from core.routing import EProfile, RouteSummary
+from core.routing import RouteSummary
+
+P = Point(lat=60.17, lon=24.94)
 
 
-def test_select_optimal_leg_prefers_faster_foot() -> None:
-    foot = TravelLeg(time=20.0, distance=1500.0)
-    pt = TravelLeg(time=12.0, distance=400.0)
-    chosen = select_optimal_leg(foot, pt)
-    assert chosen == pt
+def spot(
+    open_at: float = 0,
+    close: float = 1440,
+    min_stay: float = 30,
+    max_stay: float = 60,
+    kind: AttractionType = AttractionType.MUSEUM,
+) -> Attraction:
+    return Attraction(
+        position=P,
+        opening_hours=OpeningHours(open=open_at, close=close),
+        stay=StayBounds(min=min_stay, max=max_stay),
+        type=kind,
+    )
 
 
-def test_select_optimal_leg_prefers_foot_on_tie() -> None:
-    foot = TravelLeg(time=10.0, distance=800.0)
-    pt = TravelLeg(time=10.0, distance=300.0)
-    chosen = select_optimal_leg(foot, pt)
-    assert chosen == foot
+def route_summary(distance: float, time: float) -> RouteSummary:
+    return RouteSummary(distance=distance, time=time)
 
 
-def test_select_optimal_leg_without_public_transport() -> None:
-    foot = TravelLeg(time=15.0, distance=900.0)
+def fake_matrices(
+    n: int,
+    minutes: float = 10.0,
+    meters: float = 500.0,
+    edges: dict[tuple[int, int], float] | None = None,
+) -> TravelMatrices:
+    async def fetch(i: int, j: int) -> TravelLeg:
+        if i == j:
+            return TravelLeg(time=0.0, distance=0.0)
+        d = meters
+        if edges:
+            d = edges[(i, j)] if (i, j) in edges else edges[(j, i)]
+        return TravelLeg(time=minutes, distance=d)
+
+    legs = AsyncLazyMatrix(n, fetch)
+    t = AsyncMatrixFieldView(legs, "time")
+    d = AsyncMatrixFieldView(legs, "distance")
+    return TravelMatrices(t, d, t, d, t, d)
+
+
+@pytest.mark.asyncio
+async def test_mst_weight() -> None:
+    edges = {(0, 1): 10.0, (0, 2): 20.0, (1, 2): 5.0}
+    m = fake_matrices(3, edges=edges)
+    assert await mst_weight([0, 1, 2], m.walk_dist) == pytest.approx(15.0)
+
+
+@pytest.mark.asyncio
+async def test_cached_mst_cut() -> None:
+    m = fake_matrices(3, edges={(0, 1): 10.0, (0, 2): 20.0, (1, 2): 5.0})
+    cache: dict[int, float] = {0b110: 5.0}
+    w = await cached_mst_weight(0, 3, 0b001, m.walk_dist, cache)
+    assert w == pytest.approx(15.0)
+    assert cache[0b111] == pytest.approx(15.0)
+
+
+def test_stay_options() -> None:
+    a = spot(max_stay=90)
+    assert stay_options(a, 0, 1440, StaySelectionMode.INTERVALS_15_MIN) == [
+        30.0,
+        45.0,
+        60.0,
+        75.0,
+        90.0,
+    ]
+    assert stay_options(a, 0, 1440, StaySelectionMode.GREEDY) == [90.0]
+
+
+def test_trip_end() -> None:
+    attrs = [spot(close=1000), spot(close=800, kind=AttractionType.PARK)]
+    problem = RouteOptimizationInput(0.0, attrs)
+    node = SearchNode(1, 3, 100.0, 0, 0, (VisitDecision(1, 50.0, 100.0),))
+    assert trip_end(problem, node) == 800.0
+
+    fixed = RouteOptimizationInput(0.0, [spot()], end_time=500.0)
+    assert trip_end(fixed, SearchNode(0, 1, 0.0, 0, 0, ())) == 500.0
+
+
+@pytest.mark.parametrize(
+    "departure,close,trip_end,travel,ok",
+    [
+        (590, 600, 1440, 15, False),
+        (580, 610, 1440, 5, False),
+        (100, 1440, 120, 10, False),
+        (600, 1080, 1200, 15, True),
+    ],
+)
+def test_passes_pruning(
+    departure: float, close: float, trip_end: float, travel: float, ok: bool
+) -> None:
+    a = spot(close=close)
+    assert passes_pruning(departure, a, travel, trip_end) is ok
+
+
+def test_select_optimal_leg() -> None:
+    foot = TravelLeg(time=20, distance=1500)
+    pt = TravelLeg(time=12, distance=400)
+    assert select_optimal_leg(foot, pt) == pt
+    tie = TravelLeg(time=10, distance=800)
+    assert select_optimal_leg(tie, TravelLeg(time=10, distance=300)) == tie
     assert select_optimal_leg(foot, None) == foot
 
 
 @pytest.mark.asyncio
-async def test_create_travel_matrices_combines_modes(monkeypatch: pytest.MonkeyPatch) -> None:
-    attractions = [
-        Attraction(
-            position=Point(lat=60.17, lon=24.94),
-            opening_hours=OpeningHours(open=540, close=1080),
-            stay=StayBounds(min=30, max=90),
-            type=AttractionType.MUSEUM,
-        ),
-        Attraction(
-            position=Point(lat=60.18, lon=24.95),
-            opening_hours=OpeningHours(open=600, close=1020),
-            stay=StayBounds(min=45, max=120),
-            type=AttractionType.PARK,
-        ),
+async def test_h_stay_experimental() -> None:
+    attrs = [spot(close=200, max_stay=100), spot(close=50, max_stay=80, kind=AttractionType.PARK)]
+    problem = RouteOptimizationInput(0.0, attrs, heuristic_mode=HeuristicMode.EXPERIMENTAL_STAY)
+    node = SearchNode(0, 1, 0.0, 0, 0, ())
+    assert await h_stay(node, problem, fake_matrices(2, meters=100)) == pytest.approx(
+        BETA * 40.0
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start,close,msg",
+    [(0, 20, "Attraction 1"), (80, 100, "Attraction 1")],
+)
+async def test_validate_preliminary_rejects(start: float, close: float, msg: str) -> None:
+    problem = RouteOptimizationInput(start, [spot(), spot(close=close, kind=AttractionType.PARK)])
+    with pytest.raises(RouteOptimizationError, match=msg):
+        await validate_preliminary_feasibility(problem, fake_matrices(2))
+
+
+@pytest.mark.asyncio
+async def test_create_travel_matrices(monkeypatch: pytest.MonkeyPatch) -> None:
+    attrs = [
+        spot(open_at=540, close=1080, max_stay=90),
+        spot(open_at=600, close=1020, min_stay=45, max_stay=120, kind=AttractionType.PARK),
     ]
 
-    async def mock_foot_route(
-        client: object,
-        from_point: Point,
-        to_point: Point,
-        profile: EProfile,
-        cache: RouteCache[RouteSummary] | None = None,
-        semaphore: object = None,
-    ) -> RouteSummary:
-        return RouteSummary(distance=1000.0, time=1200.0)
+    async def foot(*_a, **_k):
+        return route_summary(1000, 1200)
 
-    async def mock_pt_route(
-        db: object,
-        client: object,
-        from_point: Point,
-        to_point: Point,
-        radius: float,
-        max_count: int,
-        cache: RouteCache[RouteSummary] | None = None,
-    ) -> RouteSummary:
-        return RouteSummary(distance=250.0, time=480.0)
+    async def pt(*_a, **_k):
+        return route_summary(250, 480)
 
+    monkeypatch.setattr("core.route_optimizer.calculate_route_between", foot)
     monkeypatch.setattr(
-        "core.route_optimizer.calculate_route_between",
-        mock_foot_route,
+        "core.route_optimizer.calculate_public_transport_route_between", pt
     )
+    m = create_travel_matrices(attrs, client=MagicMock(), db=MagicMock(), route_cache=RouteCache())
+
+    assert await m.travel_time.get(0, 1) == pytest.approx(8.0)
+    assert await m.walk_dist.get(0, 1) == pytest.approx(250.0)
+    assert m.travel_time.is_cached(0, 1)
+
+
+@pytest.mark.asyncio
+async def test_create_travel_matrices_pt_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    attrs = [spot(), spot(kind=AttractionType.PARK)]
+
+    async def foot(*_a, **_k):
+        return route_summary(900, 600)
+
+    async def no_pt(*_a, **_k):
+        raise RouteNotFoundError(RouteNotFoundCode.NO_VIABLE_ROUTE, "no pt")
+
+    monkeypatch.setattr("core.route_optimizer.calculate_route_between", foot)
     monkeypatch.setattr(
-        "core.route_optimizer.calculate_public_transport_route_between",
-        mock_pt_route,
+        "core.route_optimizer.calculate_public_transport_route_between", no_pt
     )
+    m = create_travel_matrices(attrs, client=MagicMock(), db=MagicMock(), route_cache=RouteCache())
 
-    matrices = create_travel_matrices(
-        attractions,
-        client=MagicMock(),
-        db=MagicMock(),
-        route_cache=RouteCache(),
-    )
+    assert await m.travel_time.get(0, 1) == pytest.approx(10.0)
+    assert await m.walk_dist.get(0, 1) == pytest.approx(900.0)
 
-    assert await matrices.foot_time.get(0, 1) == pytest.approx(20.0)
-    assert await matrices.foot_distance.get(0, 1) == pytest.approx(1000.0)
-    assert await matrices.public_transport_time.get(0, 1) == pytest.approx(8.0)
-    assert await matrices.public_transport_distance.get(0, 1) == pytest.approx(250.0)
-    assert await matrices.travel_time.get(0, 1) == pytest.approx(8.0)
-    assert await matrices.walk_dist.get(0, 1) == pytest.approx(250.0)
 
-    assert matrices.foot_time.is_cached(0, 1)
-    assert matrices.travel_time.is_cached(0, 1)
-    assert not matrices.foot_time.is_cached(1, 0)
+@pytest.mark.asyncio
+async def test_optimize_route() -> None:
+    problem = RouteOptimizationInput(0.0, [spot(), spot(kind=AttractionType.PARK)])
+    result = await optimize_route(problem, fake_matrices(2))
+
+    assert len(result.visits) == 1
+    v = result.visits[0]
+    assert v.attraction_index == 1
+    assert v.arrival_time == pytest.approx(10.0)
+    assert v.stay == pytest.approx(60.0)
+    assert result.end_time == pytest.approx(1440.0)
+
+
+@pytest.mark.asyncio
+async def test_optimize_route_three_nodes() -> None:
+    attrs = [spot(), spot(kind=AttractionType.PARK), spot(kind=AttractionType.OTHER)]
+    result = await optimize_route(RouteOptimizationInput(0.0, attrs), fake_matrices(3))
+    assert len(result.visits) == 2
+    assert {v.attraction_index for v in result.visits} == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_optimize_route_prefers_short_walk() -> None:
+    attrs = [spot(), spot(kind=AttractionType.PARK), spot(kind=AttractionType.OTHER)]
+    m = fake_matrices(3, edges={(0, 1): 1000, (0, 2): 100, (1, 2): 100})
+    result = await optimize_route(RouteOptimizationInput(0.0, attrs), m)
+    assert [v.attraction_index for v in result.visits] == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_optimize_route_unreachable() -> None:
+    problem = RouteOptimizationInput(600.0, [spot(), spot(close=500, kind=AttractionType.PARK)])
+    with pytest.raises(RouteOptimizationError):
+        await optimize_route(problem, fake_matrices(2))

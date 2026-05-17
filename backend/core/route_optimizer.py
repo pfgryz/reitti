@@ -1,3 +1,4 @@
+import heapq
 from dataclasses import dataclass
 from enum import Enum
 
@@ -19,11 +20,23 @@ from core.routing import (
     calculate_route_between,
 )
 
-# Cost weights (spec: β ≫ α — stay time dominates, then walking distance)
-ALPHA = 1.0  # per meter walked
-BETA = 10_000.0  # per minute of unused stay time
-
+ALPHA = 1.0
+BETA = 10_000.0
 STAY_INTERVAL_MINUTES = 15
+
+
+class RouteOptimizationError(Exception):
+    pass
+
+
+class StaySelectionMode(str, Enum):
+    GREEDY = "greedy"
+    INTERVALS_15_MIN = "intervals_15_min"
+
+
+class HeuristicMode(str, Enum):
+    BASIC = "basic"
+    EXPERIMENTAL_STAY = "experimental_stay"
 
 
 class AttractionType(str, Enum):
@@ -58,12 +71,14 @@ class RouteOptimizationInput:
     start_time: float
     attractions: list[Attraction]
     end_time: float | None = None
+    stay_mode: StaySelectionMode = StaySelectionMode.INTERVALS_15_MIN
+    heuristic_mode: HeuristicMode = HeuristicMode.BASIC
 
 
 @dataclass(frozen=True, slots=True)
 class TravelLeg:
-    time: float  # minutes
-    distance: float  # meters
+    time: float
+    distance: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +91,214 @@ class TravelMatrices:
     walk_dist: AsyncMatrixFieldView[TravelLeg, float]
 
 
+@dataclass(frozen=True, slots=True)
+class VisitDecision:
+    attraction_index: int
+    arrival_time: float
+    departure_time: float
+
+    @property
+    def stay(self) -> float:
+        return self.departure_time - self.arrival_time
+
+
+@dataclass(frozen=True, slots=True)
+class RouteOptimizationResult:
+    visits: tuple[VisitDecision, ...]
+    end_time: float
+
+
+@dataclass(frozen=True, slots=True)
+class SearchNode:
+    u: int
+    visited: int
+    t: float
+    d_so_far: float
+    unused_so_far: float
+    visits: tuple[VisitDecision, ...]
+
+
+def _nodes_from_mask(mask: int) -> list[int]:
+    nodes: list[int] = []
+    bit = 0
+    while mask:
+        if mask & 1:
+            nodes.append(bit)
+        mask >>= 1
+        bit += 1
+    return nodes
+
+
+def _close(attraction: Attraction, trip_end: float | None) -> float:
+    close = attraction.opening_hours.close
+    return close if trip_end is None else min(close, trip_end)
+
+
+def trip_end(problem: RouteOptimizationInput, node: SearchNode) -> float:
+    if problem.end_time is not None:
+        return problem.end_time
+    if node.visits:
+        i = node.visits[-1].attraction_index
+        return problem.attractions[i].opening_hours.close
+    return problem.attractions[0].opening_hours.close
+
+
+def passes_pruning(
+    departure: float,
+    attraction: Attraction,
+    travel_time: float,
+    trip_end: float,
+) -> bool:
+    oh = attraction.opening_hours
+    raw = departure + travel_time
+    if raw > oh.close:
+        return False
+    arrival = max(raw, oh.open)
+    min_stay = attraction.stay.min
+    return arrival + min_stay <= oh.close and arrival + min_stay <= trip_end
+
+
+def stay_options(
+    attraction: Attraction,
+    arrival: float,
+    trip_end: float,
+    mode: StaySelectionMode,
+) -> list[float]:
+    max_stay = min(
+        attraction.stay.max,
+        _close(attraction, trip_end) - arrival,
+    )
+    if max_stay < attraction.stay.min:
+        return []
+    if mode == StaySelectionMode.GREEDY:
+        return [max_stay]
+    out: list[float] = []
+    stay = attraction.stay.min
+    while stay <= max_stay + 1e-9:
+        out.append(stay)
+        stay += STAY_INTERVAL_MINUTES
+    return out
+
+
+async def validate_preliminary_feasibility(
+    problem: RouteOptimizationInput,
+    matrices: TravelMatrices,
+) -> None:
+    for index, a in enumerate(problem.attractions):
+        close = _close(a, problem.end_time)
+        open_t, min_stay = a.opening_hours.open, a.stay.min
+
+        if open_t + min_stay > close:
+            raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+
+        if index == 0:
+            if max(problem.start_time, open_t) + min_stay > close:
+                raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+            continue
+
+        t0 = await matrices.travel_time.get(0, index)
+        if max(problem.start_time + t0, open_t) + min_stay <= close:
+            continue
+
+        ok = False
+        for p, other in enumerate(problem.attractions):
+            if p in (0, index):
+                continue
+            t = await matrices.travel_time.get(p, index)
+            arr = max(other.opening_hours.open + other.stay.min + t, open_t)
+            if arr + min_stay <= close:
+                ok = True
+                break
+        if not ok:
+            raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+
+
+async def mst_weight(
+    nodes: list[int],
+    walk_dist: AsyncMatrixFieldView[TravelLeg, float],
+) -> float:
+    if len(nodes) <= 1:
+        return 0.0
+    in_tree = {nodes[0]}
+    remaining = set(nodes[1:])
+    total = 0.0
+    while remaining:
+        best_d, best_v = float("inf"), None
+        for u in in_tree:
+            for v in remaining:
+                d = await walk_dist.get(u, v)
+                if d < best_d:
+                    best_d, best_v = d, v
+        if best_v is None:
+            break
+        total += best_d
+        in_tree.add(best_v)
+        remaining.remove(best_v)
+    return total
+
+
+async def cached_mst_weight(
+    u: int,
+    n: int,
+    visited: int,
+    walk_dist: AsyncMatrixFieldView[TravelLeg, float],
+    cache: dict[int, float],
+) -> float:
+    full = (1 << n) - 1
+    unvisited = full & ~visited
+    mask = unvisited | (1 << u)
+
+    if mask == (1 << u):
+        return 0.0
+    if mask in cache:
+        return cache[mask]
+
+    if unvisited and unvisited in cache:
+        min_edge = float("inf")
+        for v in _nodes_from_mask(unvisited):
+            min_edge = min(min_edge, await walk_dist.get(u, v))
+        cache[mask] = cache[unvisited] + min_edge
+        return cache[mask]
+
+    nodes = _nodes_from_mask(mask)
+    total = await mst_weight(nodes, walk_dist)
+    cache[mask] = total
+    if unvisited and unvisited not in cache:
+        uv = _nodes_from_mask(unvisited)
+        if len(uv) > 1:
+            cache[unvisited] = await mst_weight(uv, walk_dist)
+    return total
+
+
+async def h_stay(
+    node: SearchNode,
+    problem: RouteOptimizationInput,
+    matrices: TravelMatrices,
+) -> float:
+    if problem.heuristic_mode == HeuristicMode.BASIC:
+        return 0.0
+    total = 0.0
+    for i, a in enumerate(problem.attractions):
+        if node.visited & (1 << i):
+            continue
+        t = await matrices.travel_time.get(node.u, i)
+        arr = max(node.t + t, a.opening_hours.open)
+        total += max(0.0, a.stay.max - (a.opening_hours.close - arr))
+    return BETA * total
+
+
+def select_optimal_leg(foot: TravelLeg, pt: TravelLeg | None) -> TravelLeg:
+    if pt is None or foot.time <= pt.time:
+        return foot
+    return pt
+
+
+def _leg_views(legs: AsyncLazyMatrix[TravelLeg]) -> tuple[
+    AsyncMatrixFieldView[TravelLeg, float], AsyncMatrixFieldView[TravelLeg, float]
+]:
+    return AsyncMatrixFieldView(legs, "time"), AsyncMatrixFieldView(legs, "distance")
+
+
 def create_travel_matrices(
     attractions: list[Attraction],
     *,
@@ -84,79 +307,128 @@ def create_travel_matrices(
     route_cache: RouteCache[RouteSummary],
 ) -> TravelMatrices:
     n = len(attractions)
-    points = [attraction.position for attraction in attractions]
+    pts = [a.position for a in attractions]
 
-    async def fetch_foot_leg(i: int, j: int) -> TravelLeg:
+    async def foot(i: int, j: int) -> TravelLeg:
         if i == j:
-            return TravelLeg(time=0.0, distance=0.0)
-        route = await calculate_route_between(
-            client, points[i], points[j], EProfile.Foot, route_cache
-        )
-        return TravelLeg(time=route.time / 60, distance=route.distance)
+            return TravelLeg(0.0, 0.0)
+        r = await calculate_route_between(client, pts[i], pts[j], EProfile.Foot, route_cache)
+        return TravelLeg(time=r.time / 60, distance=r.distance)
 
-    async def fetch_public_transport_leg(i: int, j: int) -> TravelLeg:
+    async def pt(i: int, j: int) -> TravelLeg:
         if i == j:
-            return TravelLeg(time=0.0, distance=0.0)
-        route = await calculate_public_transport_route_between(
+            return TravelLeg(0.0, 0.0)
+        r = await calculate_public_transport_route_between(
             db,
             client,
-            points[i],
-            points[j],
+            pts[i],
+            pts[j],
             MAX_TRAVEL_DISTANCE_TO_PUBLIC_TRANSPORT,
             MAX_PUBLIC_TRANSPORT_STOPS_TO_CONSIDER,
             route_cache,
         )
-        return TravelLeg(time=route.time / 60, distance=route.distance)
+        return TravelLeg(time=r.time / 60, distance=r.distance)
 
-    foot_legs = AsyncLazyMatrix(n, fetch_foot_leg)
-    public_transport_legs = AsyncLazyMatrix(n, fetch_public_transport_leg)
+    foot_legs = AsyncLazyMatrix(n, foot)
+    pt_legs = AsyncLazyMatrix(n, pt)
 
-    async def fetch_optimal_leg(i: int, j: int) -> TravelLeg:
+    async def best(i: int, j: int) -> TravelLeg:
         if i == j:
-            return TravelLeg(time=0.0, distance=0.0)
-        foot = await foot_legs.get(i, j)
+            return TravelLeg(0.0, 0.0)
+        f = await foot_legs.get(i, j)
         try:
-            pt = await public_transport_legs.get(i, j)
+            p = await pt_legs.get(i, j)
         except RouteNotFoundError:
-            return foot
-        return select_optimal_leg(foot, pt)
+            return f
+        return select_optimal_leg(f, p)
 
-    optimal_legs = AsyncLazyMatrix(n, fetch_optimal_leg)
-    return TravelMatrices(
-        foot_time=AsyncMatrixFieldView(foot_legs, "time"),
-        foot_distance=AsyncMatrixFieldView(foot_legs, "distance"),
-        public_transport_time=AsyncMatrixFieldView(public_transport_legs, "time"),
-        public_transport_distance=AsyncMatrixFieldView(
-            public_transport_legs, "distance"
-        ),
-        travel_time=AsyncMatrixFieldView(optimal_legs, "time"),
-        walk_dist=AsyncMatrixFieldView(optimal_legs, "distance"),
-    )
+    best_legs = AsyncLazyMatrix(n, best)
+    foot_t, foot_d = _leg_views(foot_legs)
+    pt_t, pt_d = _leg_views(pt_legs)
+    best_t, best_d = _leg_views(best_legs)
+    return TravelMatrices(foot_t, foot_d, pt_t, pt_d, best_t, best_d)
 
 
-def select_optimal_leg(foot: TravelLeg, pt: TravelLeg | None) -> TravelLeg:
-    if pt is None:
-        return foot
-    if foot.time <= pt.time:
-        return TravelLeg(time=foot.time, distance=foot.distance)
-    return TravelLeg(time=pt.time, distance=pt.distance)
+async def _expand(
+    node: SearchNode,
+    problem: RouteOptimizationInput,
+    matrices: TravelMatrices,
+) -> list[SearchNode]:
+    out: list[SearchNode] = []
+    end = trip_end(problem, node)
+
+    for w, a in enumerate(problem.attractions):
+        if node.visited & (1 << w):
+            continue
+        travel = await matrices.travel_time.get(node.u, w)
+        if not passes_pruning(node.t, a, travel, end):
+            continue
+
+        arrival = max(node.t + travel, a.opening_hours.open)
+        walk = await matrices.walk_dist.get(node.u, w)
+
+        for stay in stay_options(a, arrival, end, problem.stay_mode):
+            visit = VisitDecision(w, arrival, arrival + stay)
+            out.append(
+                SearchNode(
+                    u=w,
+                    visited=node.visited | (1 << w),
+                    t=arrival + stay,
+                    d_so_far=node.d_so_far + walk,
+                    unused_so_far=node.unused_so_far + a.stay.max - stay,
+                    visits=node.visits + (visit,),
+                )
+            )
+    return out
 
 
-@dataclass(frozen=True, slots=True)
-class SearchState:
-    """s = (u, Visited, t) - current attraction, visited bitmask, departure time."""
+async def optimize_route(
+    problem: RouteOptimizationInput,
+    matrices: TravelMatrices,
+) -> RouteOptimizationResult:
+    n = len(problem.attractions)
+    if n == 0:
+        return RouteOptimizationResult((), problem.start_time)
 
-    u: int
-    visited: int
-    t: float
+    await validate_preliminary_feasibility(problem, matrices)
 
+    goal = (1 << n) - 1
+    start = SearchNode(0, 1, problem.start_time, 0.0, problem.attractions[0].stay.max, ())
+    mst_cache: dict[int, float] = {}
+    best_g: dict[tuple[int, int, float], float] = {}
+    heap: list[tuple[float, float, int, SearchNode]] = []
+    seq = 0
 
-async def optimize_route(problem: RouteOptimizationInput) -> None:
-    travel_matrices = create_travel_matrices(
-        problem.attractions,
-        client=httpx.AsyncClient(),
-        db=asyncpg.Pool(),
-        route_cache=RouteCache[RouteSummary](),
-    )
+    async def f(node: SearchNode) -> float:
+        g = ALPHA * node.d_so_far + BETA * node.unused_so_far
+        h = ALPHA * await cached_mst_weight(
+            node.u, n, node.visited, matrices.walk_dist, mst_cache
+        )
+        return g + h + await h_stay(node, problem, matrices)
 
-    raise NotImplementedError
+    def state_key(node: SearchNode) -> tuple[int, int, float]:
+        return (node.u, node.visited, node.t)
+
+    g0 = ALPHA * start.d_so_far + BETA * start.unused_so_far
+    best_g[state_key(start)] = g0
+    heapq.heappush(heap, (await f(start), g0, seq, start))
+    seq += 1
+
+    while heap:
+        _, _, _, node = heapq.heappop(heap)
+        g = ALPHA * node.d_so_far + BETA * node.unused_so_far
+        if g > best_g.get(state_key(node), float("inf")):
+            continue
+        if node.visited == goal:
+            return RouteOptimizationResult(node.visits, trip_end(problem, node))
+
+        for succ in await _expand(node, problem, matrices):
+            gs = ALPHA * succ.d_so_far + BETA * succ.unused_so_far
+            k = state_key(succ)
+            if gs >= best_g.get(k, float("inf")):
+                continue
+            best_g[k] = gs
+            heapq.heappush(heap, (await f(succ), gs, seq, succ))
+            seq += 1
+
+    raise RouteOptimizationError("No route found")
