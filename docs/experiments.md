@@ -45,23 +45,23 @@ Generated automatically from `experiments/outputs/results.csv` and `experiments/
 
 | mode | experiment | avg_ok_rate | avg_wall_time_ms | avg_expanded_nodes | avg_peak_memory_mb | median_objective_cost | avg_stay_utilization |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| fixture | astar_greedy | 0.654 | 0.44 | 12.111 | 0.011 | 5616.0 | 0.958 |
-| fixture | astar_intervals | 0.744 | 20.912 | 799.333 | 0.188 | 5967.0 | 0.903 |
-| fixture | astar_intervals_no_heuristic | 0.722 | 378.905 | 4394.0 | 6.627 | 4212.0 | 0.934 |
-| fixture | bruteforce_greedy | 0.611 | 1.847 | 188.167 | 0.021 | 3861.0 | 0.923 |
-| fixture | bruteforce_intervals | 0.611 | 33.497 | 1993.667 | 0.241 | 3861.0 | 0.923 |
-| real | astar_greedy | 0.788 | 3360.3 | 166.389 | 1.084 | 3091.937 | 0.942 |
-| real | astar_intervals | 0.795 | 498.451 | 181.889 | 1.472 | 3088.787 | 0.948 |
-| real | astar_intervals_no_heuristic | 0.722 | 626.652 | 4508.0 | 22.108 | 2906.525 | 0.933 |
-| real | bruteforce_greedy | 0.611 | 17.834 | 401.5 | 0.109 | 2762.593 | 0.913 |
-| real | bruteforce_intervals | 0.611 | 66.843 | 4961.833 | 0.836 | 2762.593 | 0.921 |
+| fixture | astar_greedy | 0.654 | 0.433 | 12.111 | 0.011 | 5616.0 | 0.958 |
+| fixture | astar_intervals | 0.744 | 18.615 | 799.333 | 0.188 | 5967.0 | 0.903 |
+| fixture | astar_intervals_no_heuristic | 0.722 | 376.476 | 4394.0 | 6.627 | 4212.0 | 0.934 |
+| fixture | bruteforce_greedy | 0.611 | 1.82 | 188.167 | 0.021 | 3861.0 | 0.923 |
+| fixture | bruteforce_intervals | 0.611 | 33.801 | 1993.667 | 0.241 | 3861.0 | 0.923 |
+| real | astar_greedy | 0.788 | 3768.942 | 166.389 | 1.078 | 3091.937 | 0.942 |
+| real | astar_intervals | 0.795 | 503.927 | 181.889 | 1.476 | 3088.787 | 0.948 |
+| real | astar_intervals_no_heuristic | 0.722 | 598.43 | 4508.0 | 22.108 | 2906.525 | 0.933 |
+| real | bruteforce_greedy | 0.611 | 20.899 | 401.5 | 0.108 | 2762.593 | 0.913 |
+| real | bruteforce_intervals | 0.611 | 59.781 | 4961.833 | 0.837 | 2762.593 | 0.921 |
 
 ### Heuristic speedup summary
 
 | mode | mean_speedup_vs_no_heuristic | sample_count |
 | --- | --- | --- |
-| fixture | 219.0 | 19 |
-| real | 16.09 | 19 |
+| fixture | 216.921 | 19 |
+| real | 19.356 | 19 |
 
 ### Feasibility correctness summary
 
