@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import tracemalloc
 
 from tqdm import tqdm
@@ -12,6 +13,34 @@ from .solver import run_variant
 from .types import Row, Variant
 
 BRUTEFORCE_MAX_ATTRACTIONS = 10
+
+
+def _append_suite_timeout_skips(
+    *,
+    rows: list[Row],
+    scenarios: list[Scenario],
+    variants: list[Variant],
+    mode: str,
+    start_scenario_idx: int,
+    start_variant_idx: int,
+    suite_timeout_seconds: float,
+    bar,
+) -> None:
+    msg = f"suite timed out after {suite_timeout_seconds:.1f}s"
+    for s_idx in range(start_scenario_idx, len(scenarios)):
+        scenario = scenarios[s_idx]
+        v_start = start_variant_idx if s_idx == start_scenario_idx else 0
+        for v_idx in range(v_start, len(variants)):
+            rows.append(
+                row_error(
+                    variant=variants[v_idx],
+                    scenario=scenario,
+                    mode=mode,
+                    status="skipped",
+                    error=msg,
+                )
+            )
+            bar.update(1)
 
 
 async def run_case(
@@ -75,11 +104,15 @@ async def run_case(
             end_time=result.end_time,
         )
     except Exception as exc:
+        status = status_from_error(exc)
+        print(
+            f"[CASE-{status.upper()}] scenario={scenario.id} variant={variant.name} error={exc}"
+        )
         return row_error(
             variant=variant,
             scenario=scenario,
             mode=mode,
-            status=status_from_error(exc),
+            status=status,
             error=str(exc),
         )
 
@@ -91,16 +124,50 @@ async def run_suite(
     mode: str,
     timeout_seconds: float,
     astar_timeout_seconds: float | None = None,
+    suite_timeout_seconds: float | None = None,
     matrix_provider: MatrixProvider,
     desc: str,
 ) -> list[Row]:
     rows: list[Row] = []
     total = len(scenarios) * len(variants)
     bar = tqdm(total=total, desc=desc, unit="run", leave=False)
-    for scenario in scenarios:
+    started = time.monotonic()
+    for s_idx, scenario in enumerate(scenarios):
+        bar.set_description(f"{desc}:n={scenario.n_attractions}")
+        if (
+            suite_timeout_seconds is not None
+            and time.monotonic() - started >= suite_timeout_seconds
+        ):
+            _append_suite_timeout_skips(
+                rows=rows,
+                scenarios=scenarios,
+                variants=variants,
+                mode=mode,
+                start_scenario_idx=s_idx,
+                start_variant_idx=0,
+                suite_timeout_seconds=suite_timeout_seconds,
+                bar=bar,
+            )
+            break
         try:
             async with matrix_provider.acquire(scenario) as matrices:
-                for variant in variants:
+                for v_idx, variant in enumerate(variants):
+                    if (
+                        suite_timeout_seconds is not None
+                        and time.monotonic() - started >= suite_timeout_seconds
+                    ):
+                        _append_suite_timeout_skips(
+                            rows=rows,
+                            scenarios=scenarios,
+                            variants=variants,
+                            mode=mode,
+                            start_scenario_idx=s_idx,
+                            start_variant_idx=v_idx,
+                            suite_timeout_seconds=suite_timeout_seconds,
+                            bar=bar,
+                        )
+                        bar.close()
+                        return rows
                     rows.append(
                         await run_case(
                             variant=variant,
