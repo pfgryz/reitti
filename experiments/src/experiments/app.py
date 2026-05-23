@@ -51,6 +51,7 @@ async def _run(cfg: DictConfig) -> int:
     scenarios = build_scenarios(setup=setup_cfg, suite=suite_cfg)
     variants = [ALL_VARIANTS[name] for name in suite_cfg.variants]
     timeout_seconds = float(cfg.get("timeout_seconds", 60.0))
+    astar_timeout_seconds = float(cfg.get("astar_timeout_seconds", 180.0))
 
     mode = str(cfg.get("matrix", {}).get("mode", suite_cfg.matrix_mode))
     if mode == "real":
@@ -66,6 +67,7 @@ async def _run(cfg: DictConfig) -> int:
         variants=variants,
         mode=mode,
         timeout_seconds=timeout_seconds,
+        astar_timeout_seconds=astar_timeout_seconds,
         matrix_provider=matrix_provider,
         desc=f"{suite_name}:{setup_name}",
     )

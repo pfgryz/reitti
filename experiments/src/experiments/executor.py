@@ -20,6 +20,7 @@ async def run_case(
     scenario: Scenario,
     mode: str,
     timeout_seconds: float,
+    astar_timeout_seconds: float | None = None,
     matrices,
 ) -> Row:
     if (
@@ -43,6 +44,7 @@ async def run_case(
                 scenario=scenario,
                 matrices=matrices,
                 timeout_seconds=timeout_seconds,
+                astar_timeout_seconds=astar_timeout_seconds,
             )
             _, peak_bytes = tracemalloc.get_traced_memory()
         finally:
@@ -88,6 +90,7 @@ async def run_suite(
     variants: list[Variant],
     mode: str,
     timeout_seconds: float,
+    astar_timeout_seconds: float | None = None,
     matrix_provider: MatrixProvider,
     desc: str,
 ) -> list[Row]:
@@ -104,6 +107,7 @@ async def run_suite(
                             scenario=scenario,
                             mode=mode,
                             timeout_seconds=timeout_seconds,
+                            astar_timeout_seconds=astar_timeout_seconds,
                             matrices=matrices,
                         )
                     )

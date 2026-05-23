@@ -58,13 +58,33 @@ def _write_outputs(*, output_dir: Path, rows: list[Row]) -> pd.DataFrame:
             .agg(
                 run_count=("experiment", "count"),
                 ok_count=("status", lambda s: int((s == "ok").sum())),
-                wall_time_ms_mean=("wall_time_ms", "mean"),
-                wall_time_ms_std=("wall_time_ms", "std"),
-                expanded_nodes_mean=("expanded_nodes", "mean"),
-                objective_cost_median=("objective_cost", "median"),
-                peak_memory_mb_mean=("peak_memory_mb", "mean"),
+                timeout_count=("status", lambda s: int((s == "timeout").sum())),
+                timeout_rate=("status", lambda s: float((s == "timeout").mean())),
+                wall_time_ms_mean=(
+                    "wall_time_ms",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].mean(),
+                ),
+                wall_time_ms_std=(
+                    "wall_time_ms",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].std(),
+                ),
+                expanded_nodes_mean=(
+                    "expanded_nodes",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].mean(),
+                ),
+                objective_cost_median=(
+                    "objective_cost",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].median(),
+                ),
+                peak_memory_mb_mean=(
+                    "peak_memory_mb",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].mean(),
+                ),
                 optimality_gap_mean=("optimality_gap", "mean"),
-                stay_utilization_mean=("stay_utilization", "mean"),
+                stay_utilization_mean=(
+                    "stay_utilization",
+                    lambda s: s[df.loc[s.index, "status"] == "ok"].mean(),
+                ),
             )
             .reset_index()
         )

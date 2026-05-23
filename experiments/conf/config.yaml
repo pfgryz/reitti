@@ -5,7 +5,8 @@ defaults:
 
 setup_name: ${setup.name}
 suite_name: ${suite.name}
-timeout_seconds: 60.0
+timeout_seconds: 120.0
+astar_timeout_seconds: 120.0
 
 matrix:
   mode: ${suite.matrix_mode}

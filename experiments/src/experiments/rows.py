@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from .scenarios import Scenario
 from .types import Row, Variant
@@ -64,7 +64,7 @@ def row_error(
         end_time=None,
         seed=scenario.seed,
         error=error,
-        timestamp_utc=datetime.now(UTC).isoformat(),
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -113,5 +113,5 @@ def row_ok(
         end_time=end_time,
         seed=scenario.seed,
         error=None,
-        timestamp_utc=datetime.now(UTC).isoformat(),
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
