@@ -52,3 +52,11 @@ setup: (_init) (download-data) (prepare-data) (prepare-graphhopper)
 
 run:
     docker compose up -d
+
+# === FRONTEND ===
+
+frontend-install:
+    just --working-directory frontend install
+
+frontend-build:
+    just --working-directory frontend build
