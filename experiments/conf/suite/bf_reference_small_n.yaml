@@ -2,7 +2,7 @@ name: bf_reference_small_n
 matrix_mode: fixture
 variants: [astar_greedy, astar_intervals, bruteforce_greedy, bruteforce_intervals]
 n_attractions: [6, 7, 8, 9, 10]
-seed_count: 20
+seed_count: 12
 profiles: [relaxed, tight]
 include_handpicked: false
 

@@ -1,8 +1,8 @@
 name: synthetic_main
 matrix_mode: fixture
-variants: [astar_greedy, astar_intervals, bruteforce_greedy, bruteforce_intervals]
-n_attractions: [6, 9, 12, 15, 18, 22]
-seed_count: 20
+variants: [astar_greedy, astar_intervals]
+n_attractions: [6, 9, 12, 15]
+seed_count: 12
 profiles: [relaxed, tight]
 include_handpicked: false
 

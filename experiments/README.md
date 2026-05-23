@@ -37,8 +37,11 @@ Each run appends rows to one unified output table. `just pipeline-*` wrappers st
     - `real_reference`: `n=[6,9]`, `seed_count=1`, `timeout=30`
   - objective: generate all plot inputs with short runtime
 - `full`: stronger machine run
-  - fixture: seed_count 10 for grid and ablation
-  - real: full suite (grid + ablation + boundary)
+  - fixture:
+    - `synthetic_main`: A* only, `n=[6,9,12,15]`, `seed_count=12`
+    - `heuristic_ablation`: `n=[6,9,12]`, `seed_count=12`
+    - `bf_reference_small_n`: includes brute-force, `n=[6,7,8,9,10]`, `seed_count=12`
+  - real: `real_reference` with small budget and per-suite timeout
 
 ## Core Concepts (for tutor defense)
 

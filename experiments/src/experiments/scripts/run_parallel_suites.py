@@ -39,8 +39,6 @@ def _build_jobs() -> tuple[list[dict[str, object]], dict[str, object]]:
                 "timeout_seconds=60",
                 "astar_timeout_seconds=60",
                 "suite_timeout_seconds=300",
-                "suite.seed_count=12",
-                "suite.n_attractions=[6,9,12]",
                 "output.output_dir=outputs/runs/heuristic_ablation",
             ],
         },
