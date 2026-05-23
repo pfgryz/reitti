@@ -63,6 +63,21 @@
           </ul>
         </div>
 
+        <div v-if="previewPlace" class="opening-hours-container mt-2">
+          <div class="hours-title"><Calendar class="icon-xs" /> Godziny otwarcia</div>
+          <ul class="hours-list">
+            <li
+              v-for="h in previewPlace.hours"
+              :key="h.day"
+              class="hours-item"
+              :class="{ 'is-today': h.day === currentDay }"
+            >
+              <span class="day-name">{{ h.label }}</span>
+              <span class="day-time">{{ h.time }}</span>
+            </li>
+          </ul>
+        </div>
+
         <div class="time-row mt-2">
           <div class="input-group">
             <label><Clock class="icon-xs text-muted" /> Czas od (h):</label>
@@ -111,16 +126,73 @@
       <l-map ref="map" :zoom="13" :center="store.mapCenter">
         <l-tile-layer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" layer-type="base" name="OpenStreetMap"></l-tile-layer>
 
-        <l-marker :lat-lng="[store.startPoint.lat, store.startPoint.lng]">
+        <l-marker
+          v-for="place in availablePlaces"
+          :key="'avail-' + place.id"
+          :lat-lng="[place.lat, place.lng]"
+        >
+          <l-tooltip>Dostępne: {{ place.name }}</l-tooltip>
+          <l-popup>
+            <div class="map-popup">
+              <h4>{{ place.name }}</h4>
+              <template v-if="place.hours">
+                <p class="popup-subtitle">Godziny otwarcia</p>
+                <ul class="popup-hours">
+                  <li v-for="h in place.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                    <span>{{ h.label }}</span><span>{{ h.time }}</span>
+                  </li>
+                </ul>
+              </template>
+            </div>
+          </l-popup>
+        </l-marker>
+
+        <l-marker v-if="store.startPoint && store.startPoint.lat" :lat-lng="[store.startPoint.lat, store.startPoint.lng]">
+          <l-icon
+            icon-url="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png"
+            shadow-url="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png"
+            :icon-size="[25, 41]" :icon-anchor="[12, 41]" :popup-anchor="[1, -34]" :shadow-size="[41, 41]"
+          />
           <l-tooltip>Start: {{ store.startPoint.name }}</l-tooltip>
+          <l-popup>
+            <div class="map-popup">
+              <h4>🏁 {{ store.startPoint.name }} (START)</h4>
+              <template v-if="store.startPoint.hours">
+                <p class="popup-subtitle">Godziny otwarcia</p>
+                <ul class="popup-hours">
+                  <li v-for="h in store.startPoint.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                    <span>{{ h.label }}</span><span>{{ h.time }}</span>
+                  </li>
+                </ul>
+              </template>
+            </div>
+          </l-popup>
+        </l-marker>
+
+        <l-marker v-for="item in store.attractions" :key="'selected-' + item.id" :lat-lng="[item.lat, item.lng]">
+          <l-icon
+            icon-url="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png"
+            shadow-url="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png"
+            :icon-size="[25, 41]" :icon-anchor="[12, 41]" :popup-anchor="[1, -34]" :shadow-size="[41, 41]"
+          />
+          <l-tooltip>Wybrane: {{ item.name }}</l-tooltip>
+          <l-popup>
+            <div class="map-popup">
+              <h4>{{ item.name }}</h4>
+              <template v-if="item.hours">
+                <p class="popup-subtitle">Godziny otwarcia</p>
+                <ul class="popup-hours">
+                  <li v-for="h in item.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                    <span>{{ h.label }}</span><span>{{ h.time }}</span>
+                  </li>
+                </ul>
+              </template>
+            </div>
+          </l-popup>
         </l-marker>
 
         <l-marker v-if="previewPlace" :lat-lng="[previewPlace.lat, previewPlace.lng]" :opacity="0.5">
           <l-tooltip>Podgląd: {{ previewPlace.name }}</l-tooltip>
-        </l-marker>
-
-        <l-marker v-for="item in store.attractions" :key="item.id" :lat-lng="[item.lat, item.lng]">
-          <l-tooltip>{{ item.name }}</l-tooltip>
         </l-marker>
 
         <l-polyline
@@ -138,7 +210,7 @@
 import { ref, reactive, computed } from 'vue'
 import { useRouteStore } from '../stores/routeStore'
 import 'leaflet/dist/leaflet.css'
-import { LMap, LTileLayer, LMarker, LTooltip, LPolyline } from '@vue-leaflet/vue-leaflet'
+import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup, LIcon } from '@vue-leaflet/vue-leaflet'
 
 import {
   Map as MapIcon, MapPin, Clock, Flag,
@@ -146,9 +218,22 @@ import {
   List, CheckCircle2, MapPinPlus
 } from 'lucide-vue-next'
 
+const currentDay = new Date().getDay()
+
 const store = useRouteStore()
 
 const startSearch = ref(store.startPoint.name)
+
+const availablePlaces = computed(() => {
+  if (store.isRouteCalculated) return []
+
+  return store.helsinkiPlaces.filter(p => {
+    const isStart = store.startPoint && store.startPoint.lat === p.lat && store.startPoint.lng === p.lng
+    const isSelected = store.attractions.some(a => a.lat === p.lat && a.lng === p.lng)
+
+    return !isStart && !isSelected
+  })
+})
 
 const filteredStartPlaces = computed(() => {
   const query = startSearch.value.toLowerCase()
@@ -158,7 +243,7 @@ const filteredStartPlaces = computed(() => {
 
 const selectStartPlace = (place) => {
   startSearch.value = place.name
-  store.startPoint = { name: place.name, lat: place.lat, lng: place.lng }
+  store.startPoint = { name: place.name, lat: place.lat, lng: place.lng, hours: place.hours }
   store.isRouteCalculated = false
   store.routePolyline = []
 }
@@ -193,7 +278,8 @@ const handleAddAttraction = () => {
   store.addAttraction({
     ...newAttraction,
     lat: foundPlace.lat,
-    lng: foundPlace.lng
+    lng: foundPlace.lng,
+    hours: foundPlace.hours
   })
   newAttraction.name = ''
   newAttraction.stayMin = 1
@@ -348,4 +434,87 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
 .icon-lg { width: 24px; height: 24px; }
 .icon-xl { width: 32px; height: 32px; }
 .text-primary { color: var(--primary); }
+
+.opening-hours-container {
+  background: var(--secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 0.85rem;
+  animation: fadeIn 0.3s ease;
+}
+
+.hours-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.hours-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hours-item {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.hours-item.is-today {
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.map-popup h4 {
+  margin: 0 0 6px 0;
+  font-size: 1rem;
+  color: var(--text-main);
+  text-align: center;
+}
+.popup-subtitle {
+  margin: 0 0 6px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: center;
+}
+.popup-hours {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.85rem;
+  min-width: 240px;
+}
+.popup-hours li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.popup-hours li.is-today {
+  background-color: var(--primary);
+  color: white;
+  font-weight: 600;
+}
 </style>
