@@ -45,11 +45,20 @@ pipeline-full-both:
     uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=60
     uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90
 
+pipeline-full-both-parallel:
+    uv run python -m experiments.scripts.run_parallel_suites --workers 28 --real-serial
+
+merge-suite-outputs:
+    uv run python -m experiments.scripts.merge_suite_outputs
+
 run-fast: (clean-results) (pipeline-fast-both) (figures)
     @echo "Fast full pipeline done (data+plots+docs)."
 
 run-full: (clean-results) (pipeline-full-both) (figures)
     @echo "Full pipeline done (data+plots+docs)."
+
+run-full-parallel: (clean-results) (pipeline-full-both-parallel) (merge-suite-outputs) (figures)
+    @echo "Full parallel pipeline done (data+plots+docs)."
 
 run-grid:
     uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture setup.seed_count=1 suite.seed_count=1
