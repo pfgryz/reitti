@@ -1,0 +1,62 @@
+default:
+    @just --list
+
+sync:
+    uv sync
+
+clean-results:
+    rm -rf outputs
+    rm -rf ../docs/figures/experiments
+    rm -f ../docs/experiments.md
+    rm -f reports/summary.md
+
+lint:
+    uv run ruff check src tests
+
+format:
+    uv run ruff format src tests
+
+pipeline-fast-fixture:
+    uv run reitti-experiments run-pipeline --profile fast --data-mode fixture
+
+pipeline-fast-real:
+    uv run reitti-experiments run-pipeline --profile fast --data-mode real --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+
+pipeline-fast-both:
+    uv run reitti-experiments run-pipeline --profile fast --data-mode both --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+
+pipeline-full-fixture:
+    uv run reitti-experiments run-pipeline --profile full --data-mode fixture
+
+pipeline-full-real:
+    uv run reitti-experiments run-pipeline --profile full --data-mode real --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+
+pipeline-full-both:
+    uv run reitti-experiments run-pipeline --profile full --data-mode both --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+
+run-fast: (clean-results) (pipeline-fast-both) (figures)
+    @echo "Fast full pipeline done (data+plots+docs)."
+
+run-full: (clean-results) (pipeline-full-both) (figures)
+    @echo "Full pipeline done (data+plots+docs)."
+
+run-grid:
+    uv run reitti-experiments run-grid --matrix-mode fixture --seed-count 1
+
+run-ablation:
+    uv run reitti-experiments run-ablation --matrix-mode fixture --seed-count 2
+
+run-boundary:
+    uv run reitti-experiments run-boundary --matrix-mode fixture
+
+figures:
+    uv run python -m experiments.scripts.make_all
+
+summary-table:
+    uv run python -m experiments.scripts.build_summary_table
+
+docs-report:
+    uv run python -m experiments.scripts.build_docs_report
+
+test:
+    uv run pytest tests

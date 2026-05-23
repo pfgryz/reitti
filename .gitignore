@@ -4,3 +4,12 @@ data/
 __pycache__/
 *.py[cod]
 *$py.class
+docs/.context/*
+experiments/.venv/
+experiments/notebooks/
+experiments/configs/
+experiments/reitti_experiments.egg-info/
+experiments/outputs/
+experiments/reports/figures/
+*.egg-info/
+**/.ipynb_checkpoints/
