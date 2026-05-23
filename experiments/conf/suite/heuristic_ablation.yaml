@@ -1,0 +1,8 @@
+name: heuristic_ablation
+matrix_mode: fixture
+variants: [astar_intervals, astar_intervals_no_heuristic]
+n_attractions: [6, 9, 12, 15]
+seed_count: 20
+profiles: [relaxed, tight]
+include_handpicked: false
+

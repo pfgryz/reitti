@@ -1,0 +1,15 @@
+name: infeasible_sanity
+profiles: [impossible]
+n_attractions: [6, 8, 10]
+seed_count: 10
+start_time: 480
+end_time: 1320
+open_start_min: 720
+open_start_max: 840
+window_len_min: 20
+window_len_max: 45
+min_stay_min: 25
+min_stay_max: 45
+extra_max_min: 10
+extra_max_max: 20
+

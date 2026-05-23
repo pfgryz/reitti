@@ -1,0 +1,267 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from experiments.scenarios import build_scenarios, setup_from_dict, suite_from_dict
+
+
+def test_build_scenarios_is_deterministic() -> None:
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+            "profiles": ["relaxed"],
+        },
+        name="synthetic_main",
+    )
+    first = build_scenarios(setup=setup, suite=suite)
+    second = build_scenarios(setup=setup, suite=suite)
+    assert len(first) == 4
+    assert [s.id for s in first] == [s.id for s in second]
+    assert first[0].suite == "synthetic_main"
+    assert first[0].setup_name == "baseline"
+
+
+def test_build_scenarios_includes_handpicked_from_yaml(tmp_path: Path) -> None:
+    handpicked = tmp_path / "cases.yaml"
+    handpicked.write_text(
+        "\n".join(
+            [
+                "cases:",
+                "  - id: custom_boundary",
+                "    profile: impossible",
+                "    n_attractions: 7",
+                "    seed: 9001",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+            "handpicked_file": str(handpicked),
+        },
+        name="handpicked_validation",
+    )
+
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    assert [s.id for s in scenarios] == ["custom_boundary"]
+    assert [s.seed for s in scenarios] == [9001]
+    assert [s.profile for s in scenarios] == ["impossible"]
+    assert [s.n_attractions for s in scenarios] == [7]
+    assert all(s.setup_name == "baseline" for s in scenarios)
+    assert all(s.suite == "handpicked_validation" for s in scenarios)
+
+
+def test_build_scenarios_loads_default_relative_handpicked_file() -> None:
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+        },
+        name="handpicked_default",
+    )
+
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    assert [s.id for s in scenarios] == [
+        "boundary_all_impossible",
+        "boundary_single_unreachable",
+        "boundary_empty_only_start",
+        "boundary_timeout_bf",
+    ]
+
+
+def test_boundary_single_unreachable_contains_forced_unreachable_stop() -> None:
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+        },
+        name="handpicked_default",
+    )
+
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    target = next(s for s in scenarios if s.id == "boundary_single_unreachable")
+    assert target.profile == "relaxed"
+    assert target.n_attractions == 6
+    assert len(target.problem.attractions) == 6
+    unreachable = target.problem.attractions[1]
+    assert unreachable.stay.min > 0.0
+    assert (
+        unreachable.opening_hours.open + unreachable.stay.min
+        > unreachable.opening_hours.close
+    )
+
+
+def test_boundary_empty_only_start_keeps_single_start_attraction() -> None:
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+        },
+        name="handpicked_default",
+    )
+
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    target = next(s for s in scenarios if s.id == "boundary_empty_only_start")
+    assert target.profile == "relaxed"
+    assert target.n_attractions == 1
+    assert len(target.problem.attractions) == 1
+    start = target.problem.attractions[0]
+    assert start.stay.min == 0.0
+    assert start.stay.max == 0.0
+
+
+def test_build_scenarios_raises_for_invalid_handpicked_row(tmp_path: Path) -> None:
+    handpicked = tmp_path / "invalid_cases.yaml"
+    handpicked.write_text(
+        "\n".join(
+            [
+                "cases:",
+                "  - id: bad_case",
+                "    profile: relaxed",
+                "    n_attractions: 0",
+                "    seed: 42",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+            "handpicked_file": str(handpicked),
+        },
+        name="handpicked_invalid",
+    )
+
+    with pytest.raises(
+        ValueError, match="n_attractions must be an int >= 1"
+    ) as exc_info:
+        build_scenarios(setup=setup, suite=suite)
+    message = str(exc_info.value)
+    assert str(handpicked) in message
+    assert "bad_case" in message
+
+
+def test_build_scenarios_raises_for_duplicate_handpicked_ids(tmp_path: Path) -> None:
+    handpicked = tmp_path / "duplicate_cases.yaml"
+    handpicked.write_text(
+        "\n".join(
+            [
+                "cases:",
+                "  - id: duplicate_case",
+                "    profile: relaxed",
+                "    n_attractions: 6",
+                "    seed: 101",
+                "  - id: duplicate_case",
+                "    profile: tight",
+                "    n_attractions: 7",
+                "    seed: 202",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    setup = setup_from_dict(
+        {
+            "profiles": ["relaxed", "tight", "impossible"],
+            "n_attractions": [6, 9],
+            "seed_count": 2,
+        },
+        name="baseline",
+    )
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+            "handpicked_file": str(handpicked),
+        },
+        name="handpicked_duplicate",
+    )
+
+    with pytest.raises(ValueError, match="duplicate handpicked case id") as exc_info:
+        build_scenarios(setup=setup, suite=suite)
+    message = str(exc_info.value)
+    assert str(handpicked) in message
+    assert "duplicate_case" in message

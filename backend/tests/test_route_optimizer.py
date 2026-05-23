@@ -25,6 +25,7 @@ from core.route_optimizer import (
     h_stay,
     mst_weight,
     optimize_route,
+    optimize_route_instrumented,
     passes_pruning,
     select_optimal_leg,
     stay_options,
@@ -101,6 +102,17 @@ def test_stay_options() -> None:
         90.0,
     ]
     assert stay_options(a, 0, 1440, StaySelectionMode.GREEDY) == [90.0]
+
+
+def test_stay_options_includes_off_grid_max() -> None:
+    a = spot(min_stay=30, max_stay=82)
+    assert stay_options(a, 0, 1440, StaySelectionMode.INTERVALS_15_MIN) == [
+        30.0,
+        45.0,
+        60.0,
+        75.0,
+        82.0,
+    ]
 
 
 def test_trip_end() -> None:
@@ -237,3 +249,14 @@ async def test_optimize_route_unreachable() -> None:
     problem = RouteOptimizationInput(600.0, [spot(), spot(close=500, kind=AttractionType.PARK)])
     with pytest.raises(RouteOptimizationError):
         await optimize_route(problem, fake_matrices(2))
+
+
+@pytest.mark.asyncio
+async def test_optimize_route_instrumented_returns_stats() -> None:
+    problem = RouteOptimizationInput(0.0, [spot(), spot(kind=AttractionType.PARK)])
+    result, stats, wall_ms = await optimize_route_instrumented(problem, fake_matrices(2))
+    assert len(result.visits) == 1
+    assert stats.expanded_nodes > 0
+    assert stats.generated_nodes >= 1
+    assert stats.pruned_by_best_g >= 0
+    assert wall_ms >= 0.0

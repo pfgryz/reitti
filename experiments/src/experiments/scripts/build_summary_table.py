@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from .common import outputs_dir, read_aggregated
+from experiments.plots.common import outputs_dir
+
+
+def read_aggregated():
+    import pandas as pd
+
+    path = outputs_dir() / "aggregated.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
 
 
 def main() -> None:

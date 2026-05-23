@@ -1,0 +1,9 @@
+name: handpicked_validation
+matrix_mode: fixture
+variants: [astar_greedy, astar_intervals, astar_intervals_no_heuristic, bruteforce_greedy, bruteforce_intervals]
+n_attractions: []
+seed_count: 0
+profiles: []
+include_handpicked: true
+handpicked_file: handpicked/boundary.yaml
+

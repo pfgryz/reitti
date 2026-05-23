@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .metrics import _enrich_results
+from .metrics import enrich_results
 from .types import Row
 
 
@@ -19,14 +19,42 @@ def _write_outputs(*, output_dir: Path, rows: list[Row]) -> pd.DataFrame:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "raw").mkdir(parents=True, exist_ok=True)
 
+    raw_columns = list(Row.__annotations__.keys())
     rows_dict = [asdict(row) for row in rows]
     raw_df = pd.DataFrame(rows_dict)
-    df = _enrich_results(raw_df) if not raw_df.empty else raw_df
+    existing_path = output_dir / "results.csv"
+    if existing_path.exists():
+        existing_df = pd.read_csv(existing_path)
+        if not existing_df.empty:
+            existing_raw = existing_df.reindex(columns=raw_columns)
+            raw_df = pd.concat([existing_raw, raw_df], ignore_index=True)
+
+    df = enrich_results(raw_df) if not raw_df.empty else raw_df
 
     if not df.empty:
+        if "timestamp_utc" in df.columns:
+            parsed = pd.to_datetime(df["timestamp_utc"], errors="coerce")
+            df = (
+                df.assign(_parsed_ts=parsed)
+                .sort_values("_parsed_ts")
+                .drop_duplicates(
+                    subset=["experiment", "scenario_id", "mode"], keep="last"
+                )
+                .drop(columns=["_parsed_ts"])
+            )
         df.to_csv(output_dir / "results.csv", index=False)
         agg = (
-            df.groupby(["experiment", "n_attractions", "profile", "mode"], dropna=False)
+            df.groupby(
+                [
+                    "experiment",
+                    "n_attractions",
+                    "profile",
+                    "suite",
+                    "setup_name",
+                    "mode",
+                ],
+                dropna=False,
+            )
             .agg(
                 run_count=("experiment", "count"),
                 ok_count=("status", lambda s: int((s == "ok").sum())),
@@ -49,7 +77,16 @@ def _write_outputs(*, output_dir: Path, rows: list[Row]) -> pd.DataFrame:
             "w", encoding="utf-8", newline=""
         ) as fh:
             writer = csv.writer(fh)
-            writer.writerow(["experiment", "n_attractions", "profile", "mode"])
+            writer.writerow(
+                [
+                    "experiment",
+                    "n_attractions",
+                    "profile",
+                    "suite",
+                    "setup_name",
+                    "mode",
+                ]
+            )
 
     with (output_dir / "raw" / "results.jsonl").open("w", encoding="utf-8") as fh:
         for row in rows_dict:
