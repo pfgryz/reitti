@@ -1,37 +1,28 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
-from .common import (
-    detect_latest_real_vs_fixture_pair,
-    read_results_deduped,
-    save_fig,
-    summarize_with_iqr,
-)
+from .common import read_results_deduped, save_fig, summarize_with_iqr
 
 
-def main() -> None:
-    df = read_results_deduped()
-    pair = detect_latest_real_vs_fixture_pair(df)
-    if pair is None:
-        return
-    fixture_prefix, real_prefix = pair
-    part = df[
+def prepare(df: pd.DataFrame) -> pd.DataFrame:
+    return df[
         (df["experiment"].isin(["astar_greedy", "astar_intervals"]))
         & (df["status"] == "ok")
-        & (df["profile"] == "relaxed")
-        & (
-            ((df["mode"] == "fixture") & (df["scenario_id"].str.startswith(fixture_prefix, na=False)))
-            | ((df["mode"] == "real") & (df["scenario_id"].str.startswith(real_prefix, na=False)))
-        )
+        & (df["mode"].isin(["fixture", "real"]))
     ]
+
+
+def render(part: pd.DataFrame) -> None:
     if part.empty:
         return
     experiments = sorted(part["experiment"].unique())
-    fig, axes = plt.subplots(1, len(experiments), figsize=(7 * len(experiments), 5), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(experiments), figsize=(7 * len(experiments), 5), sharey=True
+    )
     if len(experiments) == 1:
         axes = [axes]
-
     for ax, experiment in zip(axes, experiments):
         p = part[part["experiment"] == experiment]
         summary = summarize_with_iqr(p, "wall_time_ms", ["mode", "n_attractions"])
@@ -52,8 +43,12 @@ def main() -> None:
         ax.grid(alpha=0.2)
     axes[0].set_ylabel("wall_time_ms (median, IQR)")
     axes[-1].legend()
-    fig.suptitle("Real vs fixture runtime (aligned relaxed suites)")
+    fig.suptitle("Real vs fixture runtime")
     save_fig("real_vs_fixture.png")
+
+
+def main() -> None:
+    render(prepare(read_results_deduped()))
 
 
 if __name__ == "__main__":

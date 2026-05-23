@@ -118,6 +118,13 @@ class SearchNode:
     visits: tuple[VisitDecision, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class RunStats:
+    expanded_nodes: int
+    generated_nodes: int
+    pruned_by_best_g: int
+
+
 def _nodes_from_mask(mask: int) -> list[int]:
     nodes: list[int] = []
     bit = 0
@@ -177,6 +184,9 @@ def stay_options(
     while stay <= max_stay + 1e-9:
         out.append(stay)
         stay += STAY_INTERVAL_MINUTES
+    # Include exact max_stay when it is off the 15-minute grid.
+    if out and abs(out[-1] - max_stay) > 1e-9:
+        out.append(max_stay)
     return out
 
 
@@ -349,7 +359,15 @@ def create_travel_matrices(
     return TravelMatrices(foot_t, foot_d, pt_t, pt_d, best_t, best_d)
 
 
-async def _expand(
+def cost_g(node: SearchNode) -> float:
+    return ALPHA * node.d_so_far + BETA * node.unused_so_far
+
+
+def state_key(node: SearchNode) -> tuple[int, int, float]:
+    return (node.u, node.visited, node.t)
+
+
+async def expand_node(
     node: SearchNode,
     problem: RouteOptimizationInput,
     matrices: TravelMatrices,
@@ -385,10 +403,33 @@ async def _expand(
 async def optimize_route(
     problem: RouteOptimizationInput,
     matrices: TravelMatrices,
+    *,
+    use_heuristic: bool = True,
 ) -> RouteOptimizationResult:
+    result, _, _ = await optimize_route_instrumented(
+        problem,
+        matrices,
+        use_heuristic=use_heuristic,
+    )
+    return result
+
+
+async def optimize_route_instrumented(
+    problem: RouteOptimizationInput,
+    matrices: TravelMatrices,
+    *,
+    use_heuristic: bool = True,
+) -> tuple[RouteOptimizationResult, RunStats, float]:
+    import time
+
+    started = time.perf_counter()
     n = len(problem.attractions)
     if n == 0:
-        return RouteOptimizationResult((), problem.start_time)
+        return (
+            RouteOptimizationResult((), problem.start_time),
+            RunStats(expanded_nodes=0, generated_nodes=0, pruned_by_best_g=0),
+            0.0,
+        )
 
     await validate_preliminary_feasibility(problem, matrices)
 
@@ -398,34 +439,49 @@ async def optimize_route(
     best_g: dict[tuple[int, int, float], float] = {}
     heap: list[tuple[float, float, int, SearchNode]] = []
     seq = 0
+    expanded_nodes = 0
+    generated_nodes = 0
+    pruned_by_best_g = 0
 
     async def f(node: SearchNode) -> float:
-        g = ALPHA * node.d_so_far + BETA * node.unused_so_far
+        g = cost_g(node)
+        if not use_heuristic:
+            return g
         h = ALPHA * await cached_mst_weight(
             node.u, n, node.visited, matrices.walk_dist, mst_cache
         )
         return g + h + await h_stay(node, problem, matrices)
 
-    def state_key(node: SearchNode) -> tuple[int, int, float]:
-        return (node.u, node.visited, node.t)
-
-    g0 = ALPHA * start.d_so_far + BETA * start.unused_so_far
+    g0 = cost_g(start)
     best_g[state_key(start)] = g0
     heapq.heappush(heap, (await f(start), g0, seq, start))
     seq += 1
 
     while heap:
+        expanded_nodes += 1
         _, _, _, node = heapq.heappop(heap)
-        g = ALPHA * node.d_so_far + BETA * node.unused_so_far
+        g = cost_g(node)
         if g > best_g.get(state_key(node), float("inf")):
             continue
         if node.visited == goal:
-            return RouteOptimizationResult(node.visits, trip_end(problem, node))
+            elapsed = (time.perf_counter() - started) * 1000.0
+            return (
+                RouteOptimizationResult(node.visits, trip_end(problem, node)),
+                RunStats(
+                    expanded_nodes=expanded_nodes,
+                    generated_nodes=generated_nodes,
+                    pruned_by_best_g=pruned_by_best_g,
+                ),
+                elapsed,
+            )
 
-        for succ in await _expand(node, problem, matrices):
-            gs = ALPHA * succ.d_so_far + BETA * succ.unused_so_far
+        successors = await expand_node(node, problem, matrices)
+        generated_nodes += len(successors)
+        for succ in successors:
+            gs = cost_g(succ)
             k = state_key(succ)
             if gs >= best_g.get(k, float("inf")):
+                pruned_by_best_g += 1
                 continue
             best_g[k] = gs
             heapq.heappush(heap, (await f(succ), gs, seq, succ))

@@ -13,3 +13,4 @@ experiments/outputs/
 experiments/reports/figures/
 *.egg-info/
 **/.ipynb_checkpoints/
+.cursor/

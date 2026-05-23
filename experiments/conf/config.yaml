@@ -1,0 +1,26 @@
+defaults:
+  - setup: baseline
+  - suite: synthetic_main
+  - _self_
+
+setup_name: ${setup.name}
+suite_name: ${suite.name}
+timeout_seconds: 60.0
+
+matrix:
+  mode: ${suite.matrix_mode}
+  density: 0.85
+  disconnected_prob: 0.0
+  time_min: 5.0
+  time_max: 45.0
+  pt_faster_prob: 0.35
+  pt_speedup_min: 1.05
+  pt_speedup_max: 1.8
+
+infra:
+  database_url: null
+  graphhopper_base_url: null
+
+output:
+  output_dir: ${hydra:runtime.cwd}/outputs
+

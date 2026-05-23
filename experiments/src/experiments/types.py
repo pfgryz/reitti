@@ -21,6 +21,8 @@ class Variant:
     use_heuristic: bool = True
 
 
+VariantsByName = dict[str, Variant]
+
 ASTAR_GREEDY = Variant("astar_greedy", StaySelectionMode.GREEDY, "astar", True)
 ASTAR_INTERVALS = Variant(
     "astar_intervals", StaySelectionMode.INTERVALS_15_MIN, "astar", True
@@ -37,6 +39,13 @@ BF_INTERVALS = Variant(
     StaySelectionMode.INTERVALS_15_MIN,
     "bruteforce",
 )
+ALL_VARIANTS: VariantsByName = {
+    ASTAR_GREEDY.name: ASTAR_GREEDY,
+    ASTAR_INTERVALS.name: ASTAR_INTERVALS,
+    ASTAR_INTERVALS_NO_H.name: ASTAR_INTERVALS_NO_H,
+    BF_GREEDY.name: BF_GREEDY,
+    BF_INTERVALS.name: BF_INTERVALS,
+}
 
 
 @dataclass(slots=True)
@@ -44,6 +53,8 @@ class Row:
     experiment: str
     scenario_id: str
     profile: str
+    suite: str
+    setup_name: str
     stay_mode: str
     mode: str
     data_source: str

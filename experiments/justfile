@@ -17,22 +17,33 @@ format:
     uv run ruff format src tests
 
 pipeline-fast-fixture:
-    uv run reitti-experiments run-pipeline --profile fast --data-mode fixture
+    uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture timeout_seconds=8 suite.seed_count=1 "suite.n_attractions=[6,9]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture timeout_seconds=12 suite.seed_count=1 "suite.n_attractions=[6,9]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress matrix.mode=fixture timeout_seconds=20 suite.seed_count=1 "suite.n_attractions=[6,8]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=20
 
 pipeline-fast-real:
-    uv run reitti-experiments run-pipeline --profile fast --data-mode real --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=30 suite.seed_count=1 "suite.n_attractions=[6,9]"
 
 pipeline-fast-both:
-    uv run reitti-experiments run-pipeline --profile fast --data-mode both --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+    uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture timeout_seconds=8 suite.seed_count=1 "suite.n_attractions=[6,9]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture timeout_seconds=12 suite.seed_count=1 "suite.n_attractions=[6,9]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress matrix.mode=fixture timeout_seconds=20 suite.seed_count=1 "suite.n_attractions=[6,8]" "suite.profiles=[relaxed,tight]"
+    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=20
+    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=30 suite.seed_count=1 "suite.n_attractions=[6,9]"
 
 pipeline-full-fixture:
-    uv run reitti-experiments run-pipeline --profile full --data-mode fixture
+    uv run python -m experiments.app suite=synthetic_main setup=network_stress matrix.mode=fixture timeout_seconds=60
 
 pipeline-full-real:
-    uv run reitti-experiments run-pipeline --profile full --data-mode real --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90
 
 pipeline-full-both:
-    uv run reitti-experiments run-pipeline --profile full --data-mode both --database-url "postgresql://admin:admin@localhost:5432/Reitti" --graphhopper-base-url "http://localhost:8989"
+    uv run python -m experiments.app suite=synthetic_main setup=network_stress matrix.mode=fixture timeout_seconds=60
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture timeout_seconds=60
+    uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress matrix.mode=fixture timeout_seconds=60
+    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=60
+    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90
 
 run-fast: (clean-results) (pipeline-fast-both) (figures)
     @echo "Fast full pipeline done (data+plots+docs)."
@@ -41,16 +52,16 @@ run-full: (clean-results) (pipeline-full-both) (figures)
     @echo "Full pipeline done (data+plots+docs)."
 
 run-grid:
-    uv run reitti-experiments run-grid --matrix-mode fixture --seed-count 1
+    uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture setup.seed_count=1 suite.seed_count=1
 
 run-ablation:
-    uv run reitti-experiments run-ablation --matrix-mode fixture --seed-count 2
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture setup.seed_count=2 suite.seed_count=2
 
 run-boundary:
-    uv run reitti-experiments run-boundary --matrix-mode fixture
+    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture
 
 figures:
-    uv run python -m experiments.scripts.make_all
+    uv run python -m experiments.plots.make_all
 
 summary-table:
     uv run python -m experiments.scripts.build_summary_table

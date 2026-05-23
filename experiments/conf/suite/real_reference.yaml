@@ -1,0 +1,8 @@
+name: real_reference
+matrix_mode: real
+variants: [astar_greedy, astar_intervals]
+n_attractions: [6, 9, 12]
+seed_count: 3
+profiles: [relaxed]
+include_handpicked: false
+

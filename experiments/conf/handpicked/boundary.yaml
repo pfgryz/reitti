@@ -1,0 +1,17 @@
+cases:
+  - id: boundary_all_impossible
+    profile: impossible
+    n_attractions: 8
+    seed: 7771
+  - id: boundary_single_unreachable
+    profile: relaxed
+    n_attractions: 6
+    seed: 7772
+  - id: boundary_empty_only_start
+    profile: relaxed
+    n_attractions: 1
+    seed: 7773
+  - id: boundary_timeout_bf
+    profile: relaxed
+    n_attractions: 10
+    seed: 7774

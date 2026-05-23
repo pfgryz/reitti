@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from .common import outputs_dir, read_aggregated, read_results
+from experiments.plots.common import outputs_dir, read_results
+
+
+def read_aggregated() -> pd.DataFrame:
+    path = outputs_dir() / "aggregated.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
 
 FIGURE_ORDER = [
     "runtime_scaling.png",
@@ -173,12 +181,11 @@ def _render_markdown(
         "- Python env synced in `experiments/` (`just sync`).\n"
         "- For real-mode runs: GraphHopper + PostGIS started and loaded.\n\n"
         "### Run commands\n"
-        "- Fast synthetic: `just experiments-fast-fixture`\n"
-        "- Fast real: `just experiments-fast-real`\n"
-        "- Fast both: `just experiments-fast-both`\n"
-        "- Full synthetic: `just experiments-full-fixture`\n"
-        "- Full real: `just experiments-full-real`\n"
-        "- Full both: `just experiments-full-both`\n\n"
+        "- Synthetic main: `uv run python -m experiments.app suite=synthetic_main setup=baseline`\n"
+        "- Heuristic ablation: `uv run python -m experiments.app suite=heuristic_ablation setup=baseline`\n"
+        "- BF reference: `uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress`\n"
+        "- Handpicked validation: `uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity`\n"
+        "- Real reference: `uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url=... infra.graphhopper_base_url=...`\n\n"
         "## Experiment Justification\n\n"
         "- **A* greedy vs A* intervals**: checks quality/runtime trade-off "
         "from richer stay-time branching.\n"

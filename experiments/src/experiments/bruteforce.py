@@ -4,7 +4,6 @@ import math
 import time
 
 from . import ensure_backend_path
-from .astar import RunStats, _cost_g, _trip_end, expand_node
 
 ensure_backend_path()
 
@@ -12,8 +11,13 @@ from core.route_optimizer import (  # noqa: E402
     RouteOptimizationError,
     RouteOptimizationInput,
     RouteOptimizationResult,
+    RunStats,
     SearchNode,
     TravelMatrices,
+    cost_g,
+    expand_node,
+    state_key,
+    trip_end,
     validate_preliminary_feasibility,
 )
 
@@ -27,7 +31,11 @@ async def run_bruteforce(
     started = time.perf_counter()
     n = len(problem.attractions)
     if n == 0:
-        return RouteOptimizationResult((), problem.start_time), RunStats(), 0.0
+        return (
+            RouteOptimizationResult((), problem.start_time),
+            RunStats(expanded_nodes=0, generated_nodes=0, pruned_by_best_g=0),
+            0.0,
+        )
 
     await validate_preliminary_feasibility(problem, matrices)
     goal = (1 << n) - 1
@@ -40,10 +48,12 @@ async def run_bruteforce(
         visits=(),
     )
 
-    stats = RunStats()
+    expanded_nodes = 0
+    generated_nodes = 0
+    pruned_by_best_g = 0
     best_goal: SearchNode | None = None
     best_state_cost: dict[tuple[int, int, float], float] = {
-        (0, 1, problem.start_time): _cost_g(root)
+        state_key(root): cost_g(root)
     }
     stack = [root]
 
@@ -52,30 +62,34 @@ async def run_bruteforce(
             raise TimeoutError(f"bruteforce timed out after {timeout_seconds:.1f}s")
 
         node = stack.pop()
-        stats.expanded_nodes += 1
+        expanded_nodes += 1
         if node.visited == goal:
-            if best_goal is None or _cost_g(node) < _cost_g(best_goal):
+            if best_goal is None or cost_g(node) < cost_g(best_goal):
                 best_goal = node
             continue
 
-        successors = await expand_node(node=node, problem=problem, matrices=matrices)
-        stats.generated_nodes += len(successors)
-        successors.sort(key=_cost_g, reverse=True)
+        successors = await expand_node(node, problem, matrices)
+        generated_nodes += len(successors)
+        successors.sort(key=cost_g, reverse=True)
         for nxt in successors:
-            key = (nxt.u, nxt.visited, nxt.t)
-            cost = _cost_g(nxt)
-            if cost >= best_state_cost.get(key, math.inf):
-                stats.pruned_by_best_g += 1
+            key = state_key(nxt)
+            node_cost = cost_g(nxt)
+            if node_cost >= best_state_cost.get(key, math.inf):
+                pruned_by_best_g += 1
                 continue
-            best_state_cost[key] = cost
+            best_state_cost[key] = node_cost
             stack.append(nxt)
 
     if best_goal is None:
         raise RouteOptimizationError("No route found")
 
-    elapsed = (time.perf_counter() - started) * 1000
+    elapsed = (time.perf_counter() - started) * 1000.0
     return (
-        RouteOptimizationResult(best_goal.visits, _trip_end(problem, best_goal)),
-        stats,
+        RouteOptimizationResult(best_goal.visits, trip_end(problem, best_goal)),
+        RunStats(
+            expanded_nodes=expanded_nodes,
+            generated_nodes=generated_nodes,
+            pruned_by_best_g=pruned_by_best_g,
+        ),
         elapsed,
     )
