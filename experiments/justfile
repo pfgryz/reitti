@@ -46,7 +46,7 @@ pipeline-full-both:
     uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90
 
 pipeline-full-both-parallel:
-    uv run python -m experiments.scripts.run_parallel_suites --workers 28 --real-serial
+    uv run python -m experiments.scripts.run_parallel_suites --workers 2 --real-serial
 
 merge-suite-outputs:
     uv run python -m experiments.scripts.merge_suite_outputs

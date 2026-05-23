@@ -20,6 +20,7 @@ def _build_jobs() -> tuple[list[dict[str, object]], dict[str, object]]:
                 "setup=network_stress",
                 "matrix.mode=fixture",
                 "timeout_seconds=60",
+                "astar_timeout_seconds=120",
                 "output.output_dir=outputs/runs/synthetic_main",
             ],
         },
@@ -35,6 +36,9 @@ def _build_jobs() -> tuple[list[dict[str, object]], dict[str, object]]:
                 "setup=baseline",
                 "matrix.mode=fixture",
                 "timeout_seconds=60",
+                "astar_timeout_seconds=75",
+                "suite.seed_count=12",
+                "suite.n_attractions=[6,9,12]",
                 "output.output_dir=outputs/runs/heuristic_ablation",
             ],
         },
@@ -50,6 +54,7 @@ def _build_jobs() -> tuple[list[dict[str, object]], dict[str, object]]:
                 "setup=window_stress",
                 "matrix.mode=fixture",
                 "timeout_seconds=60",
+                "astar_timeout_seconds=120",
                 "output.output_dir=outputs/runs/bf_reference_small_n",
             ],
         },
@@ -65,6 +70,7 @@ def _build_jobs() -> tuple[list[dict[str, object]], dict[str, object]]:
                 "setup=infeasible_sanity",
                 "matrix.mode=fixture",
                 "timeout_seconds=60",
+                "astar_timeout_seconds=120",
                 "output.output_dir=outputs/runs/handpicked_validation",
             ],
         },
@@ -196,7 +202,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run full suites with fixture jobs in parallel."
     )
-    parser.add_argument("--workers", type=int, default=28)
+    parser.add_argument("--workers", type=int, default=2)
     parser.add_argument(
         "--real-serial",
         action=argparse.BooleanOptionalAction,
