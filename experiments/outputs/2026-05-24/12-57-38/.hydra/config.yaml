@@ -1,0 +1,47 @@
+setup:
+  name: window_stress
+  start_time: 480
+  end_time: 1080
+  min_stay: 25
+  extra_max: 20
+  base_lat: 60.17
+  base_lon: 24.941
+  location_spread: 0.01
+suite:
+  name: bf_reference_small_n
+  matrix_mode: fixture
+  variants:
+  - astar_greedy
+  - astar_intervals
+  - bruteforce_greedy
+  - bruteforce_intervals
+  n_attractions:
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  seed_count: 12
+  profiles:
+  - relaxed
+  - tight
+  include_handpicked: false
+setup_name: ${setup.name}
+suite_name: ${suite.name}
+timeout_seconds: 60
+astar_timeout_seconds: 60
+suite_timeout_seconds: 300
+matrix:
+  mode: fixture
+  density: 0.85
+  disconnected_prob: 0.0
+  time_min: 5.0
+  time_max: 45.0
+  pt_faster_prob: 0.35
+  pt_speedup_min: 1.05
+  pt_speedup_max: 1.8
+infra:
+  database_url: null
+  graphhopper_base_url: null
+output:
+  output_dir: outputs/runs/bf_reference_small_n

@@ -29,37 +29,37 @@ Generated automatically from `experiments/outputs/results.csv` and `experiments/
 
 | mode | experiment | runs | ok | ok_rate |
 | --- | --- | --- | --- | --- |
-| fixture | astar_greedy | 220 | 18 | 0.082 |
-| fixture | astar_intervals | 220 | 47 | 0.214 |
-| fixture | astar_intervals_no_heuristic | 4 | 1 | 0.25 |
-| fixture | bruteforce_greedy | 124 | 3 | 0.024 |
-| fixture | bruteforce_intervals | 124 | 16 | 0.129 |
-| real | astar_greedy | 9 | 6 | 0.667 |
-| real | astar_intervals | 9 | 6 | 0.667 |
+| fixture | astar_greedy | 220 | 205 | 0.932 |
+| fixture | astar_intervals | 292 | 277 | 0.949 |
+| fixture | astar_intervals_no_heuristic | 76 | 72 | 0.947 |
+| fixture | bruteforce_greedy | 124 | 121 | 0.976 |
+| fixture | bruteforce_intervals | 124 | 110 | 0.887 |
+| real | astar_greedy | 9 | 9 | 1.0 |
+| real | astar_intervals | 9 | 9 | 1.0 |
 
 ### Runtime and quality summary
 
 | mode | experiment | avg_ok_rate | avg_wall_time_ms | avg_expanded_nodes | avg_peak_memory_mb | median_objective_cost | avg_stay_utilization |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| fixture | astar_greedy | 0.11 | 0.692 | 308.68 | 0.069 | 247176.012 | 0.917 |
-| fixture | astar_intervals | 0.22 | 34726.317 | 1472392.875 | 342.493 | 1246062.554 | 0.68 |
-| fixture | astar_intervals_no_heuristic | 0.25 | 0.002 | 1.0 | 0.002 | 0.0 | 1.0 |
-| fixture | bruteforce_greedy | 0.083 | 0.006 | 28.667 | 0.004 | 247176.012 | 0.899 |
-| fixture | bruteforce_intervals | 0.161 | 0.818 | 889.606 | 0.079 | 1038154.165 | 0.679 |
-| real | astar_greedy | 0.667 | 1286.679 | 457.5 | 1.509 | 3312.438 | 1.0 |
-| real | astar_intervals | 0.667 | 1235.884 | 457.5 | 3.356 | 3312.438 | 1.0 |
+| fixture | astar_greedy | 0.818 | 67.104 | 646.458 | 0.252 | 14913.794 | 1.0 |
+| fixture | astar_intervals | 0.857 | 62.359 | 546.83 | 0.32 | 14913.794 | 1.0 |
+| fixture | astar_intervals_no_heuristic | 0.692 | 1565.114 | 11709.844 | 74.998 | 14250.845 | 1.0 |
+| fixture | bruteforce_greedy | 0.786 | 418.142 | 23144.75 | 4.101 | 13877.614 | 1.0 |
+| fixture | bruteforce_intervals | 0.72 | 2561.584 | 141217.864 | 23.853 | 15270.08 | 1.0 |
+| real | astar_greedy | 1.0 | 2755.717 | 533.0 | 3.612 | 2875.748 | 1.0 |
+| real | astar_intervals | 1.0 | 2819.131 | 533.0 | 8.479 | 2875.748 | 1.0 |
 
 ### Heuristic speedup summary
 
 | mode | mean_speedup_vs_no_heuristic | sample_count |
 | --- | --- | --- |
-| fixture | 0.684 | 2 |
+| fixture | 85.143 | 144 |
 
 ### Feasibility correctness summary
 
 | mode | checked_cases | correct_cases | correct_rate |
 | --- | --- | --- | --- |
-| fixture | 17 | 15 | 0.882 |
+| fixture | 17 | 16 | 0.941 |
 
 ## Final Plots
 
@@ -82,6 +82,10 @@ Generated automatically from `experiments/outputs/results.csv` and `experiments/
 ### Optimality Gap
 
 ![optimality gap](figures/experiments/optimality_gap.png)
+
+### Heuristic Ablation
+
+![heuristic ablation](figures/experiments/heuristic_ablation.png)
 
 ### Feasibility Matrix
 
