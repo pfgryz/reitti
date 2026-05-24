@@ -18,6 +18,7 @@ from core.routing import (
     RouteSummary,
     calculate_public_transport_route_between,
     calculate_route_between,
+    stitch_foot_route_geometry,
 )
 
 ALPHA = 1.0
@@ -199,11 +200,15 @@ async def validate_preliminary_feasibility(
         open_t, min_stay = a.opening_hours.open, a.stay.min
 
         if open_t + min_stay > close:
-            raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+            raise RouteOptimizationError(
+                f"Attraction {index} is individually infeasible."
+            )
 
         if index == 0:
             if max(problem.start_time, open_t) + min_stay > close:
-                raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+                raise RouteOptimizationError(
+                    f"Attraction {index} is individually infeasible."
+                )
             continue
 
         t0 = await matrices.travel_time.get(0, index)
@@ -220,7 +225,9 @@ async def validate_preliminary_feasibility(
                 ok = True
                 break
         if not ok:
-            raise RouteOptimizationError(f"Attraction {index} is individually infeasible.")
+            raise RouteOptimizationError(
+                f"Attraction {index} is individually infeasible."
+            )
 
 
 async def mst_weight(
@@ -303,7 +310,9 @@ def select_optimal_leg(foot: TravelLeg, pt: TravelLeg | None) -> TravelLeg:
     return pt
 
 
-def _leg_views(legs: AsyncLazyMatrix[TravelLeg]) -> tuple[
+def _leg_views(
+    legs: AsyncLazyMatrix[TravelLeg],
+) -> tuple[
     AsyncMatrixFieldView[TravelLeg, float], AsyncMatrixFieldView[TravelLeg, float]
 ]:
     return AsyncMatrixFieldView(legs, "time"), AsyncMatrixFieldView(legs, "distance")
@@ -322,7 +331,9 @@ def create_travel_matrices(
     async def foot(i: int, j: int) -> TravelLeg:
         if i == j:
             return TravelLeg(0.0, 0.0)
-        r = await calculate_route_between(client, pts[i], pts[j], EProfile.Foot, route_cache)
+        r = await calculate_route_between(
+            client, pts[i], pts[j], EProfile.Foot, route_cache
+        )
         return TravelLeg(time=r.time / 60, distance=r.distance)
 
     async def pt(i: int, j: int) -> TravelLeg:
@@ -400,6 +411,17 @@ async def expand_node(
     return out
 
 
+async def foot_geometry_for_visit_order(
+    client: httpx.AsyncClient,
+    attractions: list[Attraction],
+    visits: tuple[VisitDecision, ...],
+    route_cache: RouteCache[RouteSummary] | None = None,
+) -> list[tuple[float, float]]:
+    waypoints = [attractions[0].position]
+    waypoints.extend(attractions[v.attraction_index].position for v in visits)
+    return await stitch_foot_route_geometry(client, waypoints, route_cache)
+
+
 async def optimize_route(
     problem: RouteOptimizationInput,
     matrices: TravelMatrices,
@@ -434,7 +456,9 @@ async def optimize_route_instrumented(
     await validate_preliminary_feasibility(problem, matrices)
 
     goal = (1 << n) - 1
-    start = SearchNode(0, 1, problem.start_time, 0.0, problem.attractions[0].stay.max, ())
+    start = SearchNode(
+        0, 1, problem.start_time, 0.0, problem.attractions[0].stay.max, ()
+    )
     mst_cache: dict[int, float] = {}
     best_g: dict[tuple[int, int, float], float] = {}
     heap: list[tuple[float, float, int, SearchNode]] = []

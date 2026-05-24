@@ -24,6 +24,7 @@ class EProfile(Enum):
 class RouteSummary(BaseModel):
     distance: float
     time: float
+    points: list[tuple[float, float]] | None = None
 
 
 class RoutingError(Exception):
@@ -35,13 +36,20 @@ class Path(TypedDict):
     time: float
 
 
-def _cache_key(profile: EProfile, from_point: Point, to_point: Point) -> tuple:
+def _cache_key(
+    profile: EProfile,
+    from_point: Point,
+    to_point: Point,
+    *,
+    include_geometry: bool = False,
+) -> tuple:
     return (
         profile.value,
         round(from_point.lat, 5),
         round(from_point.lon, 5),
         round(to_point.lat, 5),
         round(to_point.lon, 5),
+        include_geometry,
     )
 
 
@@ -59,9 +67,7 @@ def _public_transport_cache_key(
     )
 
 
-def best_path_by(
-    data: dict[str, Any], criterion: Callable[[dict], float]
-) -> Path:
+def best_path_by(data: dict[str, Any], criterion: Callable[[dict], float]) -> Path:
     if not (paths := data.get("paths")) or not isinstance(paths, list):
         raise RoutingError("GraphHopper response is empty")
 
@@ -89,7 +95,52 @@ def get_shortest_path(data: dict[str, Any]) -> Path:
     return best_path_by(data, lambda p: -float(p["distance"]))
 
 
-def _path_to_route_summary(path: dict[str, Any]) -> RouteSummary:
+def _coordinates_to_lat_lon_pairs(
+    coordinates: list[Any],
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for item in coordinates:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            raise RoutingError("GraphHopper path point is not a coordinate pair")
+
+        lon, lat = float(item[0]), float(item[1])
+        points.append((lat, lon))
+
+    if not points:
+        raise RoutingError("GraphHopper path points is empty")
+
+    return points
+
+
+def _parse_path_points(path: dict[str, Any]) -> list[tuple[float, float]]:
+    raw = path.get("points")
+    if raw is None:
+        raise RoutingError("GraphHopper path is missing points")
+
+    if isinstance(raw, str):
+        raise RoutingError(
+            "GraphHopper returned encoded polyline; use points_encoded=false"
+        )
+
+    if isinstance(raw, dict):
+        if raw.get("type") != "LineString":
+            raise RoutingError("GraphHopper path points has unsupported GeoJSON type")
+        coordinates = raw.get("coordinates")
+        if not isinstance(coordinates, list):
+            raise RoutingError("GraphHopper LineString is missing coordinates")
+        return _coordinates_to_lat_lon_pairs(coordinates)
+
+    if isinstance(raw, list):
+        return _coordinates_to_lat_lon_pairs(raw)
+
+    raise RoutingError(
+        f"GraphHopper path points has unsupported type: {type(raw).__name__}"
+    )
+
+
+def _path_to_route_summary(
+    path: dict[str, Any], *, include_geometry: bool = False
+) -> RouteSummary:
     distance = path.get("distance")
     time_ms = path.get("time")
 
@@ -99,10 +150,34 @@ def _path_to_route_summary(path: dict[str, Any]) -> RouteSummary:
     if not isinstance(distance, (int, float)) or not isinstance(time_ms, (int, float)):
         raise RoutingError("GraphHopper path distance or time is not numeric")
 
+    points = _parse_path_points(path) if include_geometry else None
+
     return RouteSummary(
         distance=float(distance),
         time=float(time_ms) / 1000,
+        points=points,
     )
+
+
+def _points_close(
+    a: tuple[float, float], b: tuple[float, float], *, eps: float = 1e-6
+) -> bool:
+    return abs(a[0] - b[0]) < eps and abs(a[1] - b[1]) < eps
+
+
+def stitch_point_sequences(
+    segments: list[list[tuple[float, float]]],
+) -> list[tuple[float, float]]:
+    if not segments:
+        return []
+
+    stitched = list(segments[0])
+    for segment in segments[1:]:
+        if not segment:
+            continue
+        start = 1 if stitched and _points_close(stitched[-1], segment[0]) else 0
+        stitched.extend(segment[start:])
+    return stitched
 
 
 async def calculate_route_between(
@@ -112,8 +187,10 @@ async def calculate_route_between(
     profile: EProfile,
     cache: RouteCache[RouteSummary] | None = None,
     semaphore: asyncio.Semaphore | None = None,
+    *,
+    include_geometry: bool = False,
 ) -> RouteSummary:
-    key = _cache_key(profile, from_point, to_point)
+    key = _cache_key(profile, from_point, to_point, include_geometry=include_geometry)
     if cache is not None:
         cached = cache.get(key)
         if cached is not None:
@@ -135,6 +212,13 @@ async def calculate_route_between(
             ("point", f"{to_point.lat},{to_point.lon}"),
             ("profile", profile.value),
         ]
+        if include_geometry:
+            params.extend(
+                [
+                    ("calc_points", "true"),
+                    ("points_encoded", "false"),
+                ]
+            )
 
         try:
             response = await client.get(url, params=params)
@@ -152,7 +236,9 @@ async def calculate_route_between(
         if msg := data.get("message") and not data.get("paths"):
             raise RoutingError(str(msg))
 
-        route = _path_to_route_summary(get_shortest_path(data))
+        route = _path_to_route_summary(
+            get_shortest_path(data), include_geometry=include_geometry
+        )
         if cache is not None:
             cache.set(key, route)
         return route
@@ -163,6 +249,36 @@ async def calculate_route_between(
     return await _fetch()
 
 
+async def stitch_foot_route_geometry(
+    client: httpx.AsyncClient,
+    waypoints: list[Point],
+    cache: RouteCache[RouteSummary] | None = None,
+    semaphore: asyncio.Semaphore | None = None,
+) -> list[tuple[float, float]]:
+    if not waypoints:
+        return []
+    if len(waypoints) == 1:
+        p = waypoints[0]
+        return [(p.lat, p.lon)]
+
+    segments: list[list[tuple[float, float]]] = []
+    for i in range(len(waypoints) - 1):
+        leg = await calculate_route_between(
+            client,
+            waypoints[i],
+            waypoints[i + 1],
+            EProfile.Foot,
+            cache,
+            semaphore,
+            include_geometry=True,
+        )
+        if leg.points is None:
+            raise RoutingError("Foot route leg is missing geometry")
+        segments.append(leg.points)
+
+    return stitch_point_sequences(segments)
+
+
 def _should_prune_leg(leg: RouteSummary, direct: RouteSummary) -> bool:
     return leg.distance > direct.distance or leg.time > direct.time
 
@@ -171,11 +287,7 @@ def _filter_stops_by_direct_route(
     stops: list[Stop], anchor: Point, direct_route: RouteSummary
 ) -> list[Stop]:
     max_m = direct_route.distance
-    return [
-        stop
-        for stop in stops
-        if haversine_distance_m(anchor, stop.point) <= max_m
-    ]
+    return [stop for stop in stops if haversine_distance_m(anchor, stop.point) <= max_m]
 
 
 async def _fetch_foot_legs(

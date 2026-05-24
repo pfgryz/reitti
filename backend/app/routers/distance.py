@@ -25,6 +25,7 @@ async def get_foot_route_request(
     from_lon: LonQuery,
     to_lat: LatQuery,
     to_lon: LonQuery,
+    geometry: bool = False,
     client: httpx.AsyncClient = Depends(get_client),
     route_cache: RouteCache[RouteSummary] = Depends(get_route_cache),
 ) -> RouteSummary:
@@ -34,6 +35,7 @@ async def get_foot_route_request(
         Point(lat=to_lat, lon=to_lon),
         EProfile.Foot,
         route_cache,
+        include_geometry=geometry,
     )
 
 
