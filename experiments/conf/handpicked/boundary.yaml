@@ -1,17 +1,108 @@
 cases:
   - id: boundary_all_impossible
+    case_mode: explicit
     profile: impossible
-    n_attractions: 8
     seed: 7771
+    attractions:
+      - open: 1170
+        close: 1185
+        min_stay: 35
+        max_stay: 45
+      - open: 1180
+        close: 1195
+        min_stay: 35
+        max_stay: 45
+      - open: 1190
+        close: 1205
+        min_stay: 35
+        max_stay: 45
+      - open: 1200
+        close: 1215
+        min_stay: 35
+        max_stay: 45
+      - open: 1210
+        close: 1225
+        min_stay: 35
+        max_stay: 45
+      - open: 1220
+        close: 1235
+        min_stay: 35
+        max_stay: 45
+      - open: 1230
+        close: 1245
+        min_stay: 35
+        max_stay: 45
+
   - id: boundary_single_unreachable
+    case_mode: explicit
     profile: relaxed
-    n_attractions: 6
     seed: 7772
+    attractions:
+      - open: 510
+        close: 515
+        min_stay: 10
+        max_stay: 15
+      - open: 560
+        close: 820
+        min_stay: 10
+        max_stay: 35
+      - open: 600
+        close: 900
+        min_stay: 10
+        max_stay: 35
+      - open: 630
+        close: 930
+        min_stay: 10
+        max_stay: 35
+      - open: 660
+        close: 960
+        min_stay: 10
+        max_stay: 35
+
   - id: boundary_empty_only_start
+    case_mode: explicit
     profile: relaxed
-    n_attractions: 1
     seed: 7773
+    attractions: []
+
   - id: boundary_timeout_bf
+    case_mode: explicit
     profile: relaxed
-    n_attractions: 10
     seed: 7774
+    attractions:
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60
+      - open: 540
+        close: 960
+        min_stay: 20
+        max_stay: 60

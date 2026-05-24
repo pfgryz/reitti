@@ -1,0 +1,7 @@
+- suite=handpicked_validation
+- setup=infeasible_sanity
+- matrix.mode=fixture
+- timeout_seconds=60
+- astar_timeout_seconds=60
+- suite_timeout_seconds=300
+- output.output_dir=outputs/runs/handpicked_validation

@@ -1,0 +1,7 @@
+- suite=bf_reference_small_n
+- setup=window_stress
+- matrix.mode=fixture
+- timeout_seconds=60
+- astar_timeout_seconds=60
+- suite_timeout_seconds=300
+- output.output_dir=outputs/runs/bf_reference_small_n

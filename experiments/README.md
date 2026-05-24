@@ -37,8 +37,11 @@ Each run appends rows to one unified output table. `just pipeline-*` wrappers st
     - `real_reference`: `n=[6,9]`, `seed_count=1`, `timeout=30`
   - objective: generate all plot inputs with short runtime
 - `full`: stronger machine run
-  - fixture: seed_count 10 for grid and ablation
-  - real: full suite (grid + ablation + boundary)
+  - fixture:
+    - `synthetic_main`: A* only, `n=[6,9,12,15]`, `seed_count=12`
+    - `heuristic_ablation`: `n=[6,9,12]`, `seed_count=12`
+    - `bf_reference_small_n`: includes brute-force, `n=[6,7,8,9,10]`, `seed_count=12`
+  - real: `real_reference` with small budget and per-suite timeout
 
 ## Core Concepts (for tutor defense)
 
@@ -48,15 +51,18 @@ Profiles control how attraction opening windows and stays are sampled in
 `experiments/src/experiments/scenarios.py`.
 
 - `relaxed`
-  - windows sampled from setup baseline ranges (`open_start_*`, `window_len_*`)
-  - usually feasible, good for normal scaling trends
+  - sampled from setup baseline ranges (`open_start_*`, `window_len_*`)
+  - generator retries with a cheap precheck; if all attempts fail, uses deterministic solvable fallback template
+  - intended to be solvable baseline profile
 - `tight`
-  - windows shifted later and shortened (`+60..+120` start shift, `60..120` length)
-  - harder scheduling, exposes pruning/search pressure
+  - windows shifted later and narrowed (so harder than relaxed but not mostly infeasible)
+  - target is harder search with still-frequent feasible cases
 - `impossible`
   - windows near trip end and very short (`15..30` min)
   - stay lower bound forced up (`min_stay >= 30`)
   - intentionally drives `infeasible` outcomes
+
+Important: generation decisions do **not** depend on solver outcome; precheck/fallback happens before solver run.
 
 ### Algorithm variants and what each proves
 
@@ -124,10 +130,10 @@ Rule: compare fixture vs real as trend/ordering, not absolute milliseconds.
 - `infeasible_sanity`: impossible-oriented setup
 - `real_reference`: setup used for real-mode reference runs
 
-Each setup defines numeric ranges:
+Each setup defines generator/network defaults:
 - time windows (`open_start_*`, `window_len_*`)
 - stay bounds (`min_stay_*`, `extra_max_*`)
-- base experiment grid defaults (`profiles`, `n_attractions`, `seed_count`)
+- location placement (`base_lat`, `base_lon`, `location_spread`)
 
 ### `suite/*.yaml` (what to run and why)
 - `synthetic_main`
@@ -153,8 +159,14 @@ Suite fields:
   - `boundary_single_unreachable`
   - `boundary_empty_only_start`
   - `boundary_timeout_bf`
+- all boundary cases are written in `case_mode: explicit` (manual windows/stays)
 - used by `handpicked_validation`
 - checked by feasibility metric rules
+
+Handpicked cases support 2 modes:
+- `generated` (default): define `profile`, `seed`, `n_attractions`, sampled via setup ranges
+- `explicit`: define `profile`, `seed`, optional `start_time`/`end_time`, and
+  `attractions` list with `open`, `close`, `min_stay`, `max_stay` (no coordinates)
 
 ## Data Modes
 

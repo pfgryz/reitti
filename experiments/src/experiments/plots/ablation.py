@@ -3,7 +3,12 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from .common import read_results_deduped, save_fig, summarize_with_iqr
+from .common import (
+    profile_label_pl,
+    read_results_deduped,
+    save_fig,
+    summarize_with_iqr,
+)
 
 
 def prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -22,9 +27,7 @@ def prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 def render(part: pd.DataFrame, profiles: list[str]) -> None:
     if part.empty or not profiles:
         return
-    fig, axes = plt.subplots(
-        1, len(profiles), figsize=(7 * len(profiles), 5), sharey=True
-    )
+    fig, axes = plt.subplots(1, len(profiles), figsize=(7 * len(profiles), 5))
     if len(profiles) == 1:
         axes = [axes]
     for ax, profile in zip(axes, profiles):
@@ -42,12 +45,13 @@ def render(part: pd.DataFrame, profiles: list[str]) -> None:
                 capsize=3,
                 label=exp,
             )
-        ax.set_xlabel("n_attractions")
-        ax.set_title(f"{profile} profile")
-        ax.grid(alpha=0.2)
-    axes[0].set_ylabel("wall_time_ms (median, IQR)")
+        ax.set_yscale("log")
+        ax.set_xlabel("liczba atrakcji")
+        ax.set_title(profile_label_pl(profile))
+        ax.grid(alpha=0.2, which="both")
+    axes[0].set_ylabel("czas wykonania [ms] (mediana, IQR, skala log)")
     axes[-1].legend()
-    fig.suptitle("Heuristic ablation runtime (fixture)")
+    fig.suptitle("Wpływ heurystyki na czas wykonania (fixture)")
     save_fig("heuristic_ablation.png")
 
 

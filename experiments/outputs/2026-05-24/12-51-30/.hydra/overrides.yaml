@@ -1,0 +1,7 @@
+- suite=heuristic_ablation
+- setup=baseline
+- matrix.mode=fixture
+- timeout_seconds=60
+- astar_timeout_seconds=60
+- suite_timeout_seconds=300
+- output.output_dir=outputs/runs/heuristic_ablation
