@@ -39,11 +39,11 @@ pipeline-full-real:
     uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90 astar_timeout_seconds=90 suite_timeout_seconds=300
 
 pipeline-full-both:
-    uv run python -m experiments.app suite=synthetic_main setup=network_stress matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=300
-    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=300
-    uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=300
-    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=300
-    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90 astar_timeout_seconds=90 suite_timeout_seconds=300
+    uv run python -m experiments.app suite=synthetic_main setup=network_stress matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=100
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=100
+    uv run python -m experiments.app suite=bf_reference_small_n setup=window_stress matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=100
+    uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture timeout_seconds=60 astar_timeout_seconds=60 suite_timeout_seconds=100
+    uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url="postgresql://admin:admin@localhost:5432/Reitti" infra.graphhopper_base_url="http://localhost:8989" timeout_seconds=90 astar_timeout_seconds=90 suite_timeout_seconds=200
 
 pipeline-full-both-parallel:
     uv run python -m experiments.scripts.run_parallel_suites --workers 2 --real-serial
