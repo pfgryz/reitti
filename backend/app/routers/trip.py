@@ -23,13 +23,7 @@ async def optimize_trip(
         client=client,
         db=db,
         route_cache=route_cache,
+        include_geometry=body.include_legs,
     )
     result = await optimize_route(problem, matrices)
-    return await from_result(
-        result,
-        matrices,
-        problem.attractions,
-        include_legs=body.include_legs,
-        client=client,
-        route_cache=route_cache,
-    )
+    return await from_result(result, matrices, include_legs=body.include_legs)

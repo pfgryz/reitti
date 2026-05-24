@@ -24,7 +24,12 @@ class EProfile(Enum):
 class RouteSummary(BaseModel):
     distance: float
     time: float
+    walk_distance: float | None = None
     points: list[tuple[float, float]] | None = None
+    access_points: list[tuple[float, float]] | None = None
+    egress_points: list[tuple[float, float]] | None = None
+    from_stop: Stop | None = None
+    to_stop: Stop | None = None
 
 
 class RoutingError(Exception):
@@ -54,7 +59,12 @@ def _cache_key(
 
 
 def _public_transport_cache_key(
-    from_point: Point, to_point: Point, radius: float, max_count: int
+    from_point: Point,
+    to_point: Point,
+    radius: float,
+    max_count: int,
+    *,
+    include_geometry: bool = False,
 ) -> tuple:
     return (
         "public-transport",
@@ -64,6 +74,7 @@ def _public_transport_cache_key(
         round(to_point.lon, 5),
         round(radius, 1),
         max_count,
+        include_geometry,
     )
 
 
@@ -297,6 +308,8 @@ async def _fetch_foot_legs(
     stop_trips: list[StopsTrip],
     cache: RouteCache[RouteSummary],
     direct_route: RouteSummary,
+    *,
+    include_geometry: bool = False,
 ) -> dict[tuple[str, str], tuple[RouteSummary, RouteSummary]]:
     unique_pairs: dict[tuple[str, str], StopsTrip] = {}
     access_stops: dict[str, Point] = {}
@@ -338,6 +351,7 @@ async def _fetch_foot_legs(
                 EProfile.Foot,
                 cache,
                 semaphore,
+                include_geometry=include_geometry,
             )
             for stop_id in access_stop_ids
         ]
@@ -351,6 +365,7 @@ async def _fetch_foot_legs(
                 EProfile.Foot,
                 cache,
                 semaphore,
+                include_geometry=include_geometry,
             )
             for stop_id in egress_stop_ids
         ]
@@ -368,6 +383,13 @@ async def _fetch_foot_legs(
     }
 
 
+def _pt_leg_distance(
+    access_leg: RouteSummary, trip: StopsTrip, egress_leg: RouteSummary
+) -> float:
+    transit_m = haversine_distance_m(trip.from_stop.point, trip.to_stop.point)
+    return access_leg.distance + transit_m + egress_leg.distance
+
+
 async def calculate_public_transport_route_between(
     db: Pool,
     client: httpx.AsyncClient,
@@ -376,12 +398,17 @@ async def calculate_public_transport_route_between(
     radius: float,
     max_count: int,
     cache: RouteCache[RouteSummary] | None = None,
+    *,
+    include_geometry: bool = False,
+    direct_route: RouteSummary | None = None,
 ) -> RouteSummary:
     if cache is None:
         raise ConfigurationError("Route cache is not configured")
     route_cache = cache
 
-    pt_key = _public_transport_cache_key(from_point, to_point, radius, max_count)
+    pt_key = _public_transport_cache_key(
+        from_point, to_point, radius, max_count, include_geometry=include_geometry
+    )
     cached_route = route_cache.get(pt_key)
     if cached_route is not None:
         return cached_route
@@ -391,9 +418,10 @@ async def calculate_public_transport_route_between(
         get_nearest_stops_in_radius(db, to_point, radius, max_count),
     )
 
-    direct_route = await calculate_route_between(
-        client, from_point, to_point, EProfile.Foot, route_cache
-    )
+    if direct_route is None:
+        direct_route = await calculate_route_between(
+            client, from_point, to_point, EProfile.Foot, route_cache
+        )
 
     from_stops = _filter_stops_by_direct_route(from_stops, from_point, direct_route)
     to_stops = _filter_stops_by_direct_route(to_stops, to_point, direct_route)
@@ -418,10 +446,19 @@ async def calculate_public_transport_route_between(
         )
 
     foot_legs = await _fetch_foot_legs(
-        client, from_point, to_point, stop_trips, route_cache, direct_route
+        client,
+        from_point,
+        to_point,
+        stop_trips,
+        route_cache,
+        direct_route,
+        include_geometry=include_geometry,
     )
 
     best_route: RouteSummary | None = None
+    best_access: RouteSummary | None = None
+    best_egress: RouteSummary | None = None
+    best_trip: StopsTrip | None = None
     evaluated_pairs: set[tuple[str, str]] = set()
     pruned_pairs: set[tuple[str, str]] = set()
 
@@ -442,12 +479,16 @@ async def calculate_public_transport_route_between(
             pruned_pairs.add(pair_key)
             continue
 
-        distance = access_leg.distance + egress_leg.distance
+        walk_m = access_leg.distance + egress_leg.distance
+        distance = _pt_leg_distance(access_leg, stop_trip, egress_leg)
         time = access_leg.time + stop_trip.average_travel_time + egress_leg.time
-        route = RouteSummary(distance=distance, time=time)
+        route = RouteSummary(distance=distance, time=time, walk_distance=walk_m)
 
         if best_route is None or route.time < best_route.time:
             best_route = route
+            best_trip = stop_trip
+            best_access = access_leg
+            best_egress = egress_leg
 
     if best_route is None:
         if evaluated_pairs and pruned_pairs == evaluated_pairs:
@@ -459,6 +500,16 @@ async def calculate_public_transport_route_between(
         raise RouteNotFoundError(
             RouteNotFoundCode.NO_VIABLE_ROUTE,
             "No viable public transport route could be assembled.",
+        )
+
+    if include_geometry and best_trip and best_access and best_egress:
+        best_route = best_route.model_copy(
+            update={
+                "access_points": best_access.points,
+                "egress_points": best_egress.points,
+                "from_stop": best_trip.from_stop,
+                "to_stop": best_trip.to_stop,
+            }
         )
 
     route_cache.set(pt_key, best_route)

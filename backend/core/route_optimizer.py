@@ -1,6 +1,7 @@
 import heapq
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal
 
 import httpx
 from asyncpg import Pool
@@ -18,7 +19,6 @@ from core.routing import (
     RouteSummary,
     calculate_public_transport_route_between,
     calculate_route_between,
-    stitch_foot_route_geometry,
 )
 
 ALPHA = 1.0
@@ -77,19 +77,41 @@ class RouteOptimizationInput:
 
 
 @dataclass(frozen=True, slots=True)
+class LegStop:
+    name: str
+    lat: float
+    lon: float
+
+
+@dataclass(frozen=True, slots=True)
+class PtDetails:
+    walk_to: tuple[tuple[float, float], ...]
+    walk_from: tuple[tuple[float, float], ...]
+    from_stop: LegStop
+    to_stop: LegStop
+
+
+@dataclass(frozen=True, slots=True)
 class TravelLeg:
     time: float
     distance: float
+    walk_distance: float
+    mode: Literal["foot", "public_transport"] = "foot"
+    points: tuple[tuple[float, float], ...] | None = None
+    pt: PtDetails | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class TravelMatrices:
-    foot_time: AsyncMatrixFieldView[TravelLeg, float]
-    foot_distance: AsyncMatrixFieldView[TravelLeg, float]
-    public_transport_time: AsyncMatrixFieldView[TravelLeg, float]
-    public_transport_distance: AsyncMatrixFieldView[TravelLeg, float]
-    travel_time: AsyncMatrixFieldView[TravelLeg, float]
-    walk_dist: AsyncMatrixFieldView[TravelLeg, float]
+    legs: AsyncLazyMatrix[TravelLeg]
+
+    @property
+    def travel_time(self) -> AsyncMatrixFieldView[TravelLeg, float]:
+        return AsyncMatrixFieldView(self.legs, "time")
+
+    @property
+    def walk_dist(self) -> AsyncMatrixFieldView[TravelLeg, float]:
+        return AsyncMatrixFieldView(self.legs, "walk_distance")
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,12 +180,12 @@ def passes_pruning(
     trip_end: float,
 ) -> bool:
     oh = attraction.opening_hours
-    raw = departure + travel_time
-    if raw > oh.close:
-        return False
-    arrival = max(raw, oh.open)
-    min_stay = attraction.stay.min
-    return arrival + min_stay <= oh.close and arrival + min_stay <= trip_end
+    arrival = max(departure + travel_time, oh.open)
+    return (
+        departure + travel_time <= oh.close
+        and arrival + attraction.stay.min <= oh.close
+        and arrival + attraction.stay.min <= trip_end
+    )
 
 
 def stay_options(
@@ -304,18 +326,40 @@ async def h_stay(
     return BETA * total
 
 
-def select_optimal_leg(foot: TravelLeg, pt: TravelLeg | None) -> TravelLeg:
-    if pt is None or foot.time <= pt.time:
-        return foot
-    return pt
-
-
-def _leg_views(
-    legs: AsyncLazyMatrix[TravelLeg],
-) -> tuple[
-    AsyncMatrixFieldView[TravelLeg, float], AsyncMatrixFieldView[TravelLeg, float]
-]:
-    return AsyncMatrixFieldView(legs, "time"), AsyncMatrixFieldView(legs, "distance")
+def _leg_from_route(route: RouteSummary, *, pt: bool) -> TravelLeg:
+    time_min = route.time / 60
+    if not pt:
+        return TravelLeg(
+            time=time_min,
+            distance=route.distance,
+            walk_distance=route.distance,
+            mode="foot",
+            points=tuple(route.points) if route.points else None,
+        )
+    walk = route.walk_distance if route.walk_distance is not None else route.distance
+    pt_details = None
+    if route.from_stop and route.to_stop and route.access_points and route.egress_points:
+        pt_details = PtDetails(
+            walk_to=tuple(route.access_points),
+            walk_from=tuple(route.egress_points),
+            from_stop=LegStop(
+                name=route.from_stop.name,
+                lat=route.from_stop.point.lat,
+                lon=route.from_stop.point.lon,
+            ),
+            to_stop=LegStop(
+                name=route.to_stop.name,
+                lat=route.to_stop.point.lat,
+                lon=route.to_stop.point.lon,
+            ),
+        )
+    return TravelLeg(
+        time=time_min,
+        distance=route.distance,
+        walk_distance=walk,
+        mode="public_transport",
+        pt=pt_details,
+    )
 
 
 def create_travel_matrices(
@@ -324,50 +368,77 @@ def create_travel_matrices(
     client: httpx.AsyncClient,
     db: Pool,
     route_cache: RouteCache[RouteSummary],
+    include_geometry: bool = False,
 ) -> TravelMatrices:
     n = len(attractions)
     pts = [a.position for a in attractions]
+    zero = TravelLeg(0.0, 0.0, 0.0)
 
-    async def foot(i: int, j: int) -> TravelLeg:
+    async def leg(i: int, j: int) -> TravelLeg:
         if i == j:
-            return TravelLeg(0.0, 0.0)
-        r = await calculate_route_between(
-            client, pts[i], pts[j], EProfile.Foot, route_cache
-        )
-        return TravelLeg(time=r.time / 60, distance=r.distance)
+            return zero
 
-    async def pt(i: int, j: int) -> TravelLeg:
-        if i == j:
-            return TravelLeg(0.0, 0.0)
-        r = await calculate_public_transport_route_between(
-            db,
+        foot_route = await calculate_route_between(
             client,
             pts[i],
             pts[j],
-            MAX_TRAVEL_DISTANCE_TO_PUBLIC_TRANSPORT,
-            MAX_PUBLIC_TRANSPORT_STOPS_TO_CONSIDER,
+            EProfile.Foot,
             route_cache,
+            include_geometry=False,
         )
-        return TravelLeg(time=r.time / 60, distance=r.distance)
-
-    foot_legs = AsyncLazyMatrix(n, foot)
-    pt_legs = AsyncLazyMatrix(n, pt)
-
-    async def best(i: int, j: int) -> TravelLeg:
-        if i == j:
-            return TravelLeg(0.0, 0.0)
-        f = await foot_legs.get(i, j)
         try:
-            p = await pt_legs.get(i, j)
+            pt_route = await calculate_public_transport_route_between(
+                db,
+                client,
+                pts[i],
+                pts[j],
+                MAX_TRAVEL_DISTANCE_TO_PUBLIC_TRANSPORT,
+                MAX_PUBLIC_TRANSPORT_STOPS_TO_CONSIDER,
+                route_cache,
+                include_geometry=False,
+                direct_route=foot_route,
+            )
         except RouteNotFoundError:
-            return f
-        return select_optimal_leg(f, p)
+            if include_geometry:
+                foot_route = await calculate_route_between(
+                    client,
+                    pts[i],
+                    pts[j],
+                    EProfile.Foot,
+                    route_cache,
+                    include_geometry=True,
+                )
+            return _leg_from_route(foot_route, pt=False)
 
-    best_legs = AsyncLazyMatrix(n, best)
-    foot_t, foot_d = _leg_views(foot_legs)
-    pt_t, pt_d = _leg_views(pt_legs)
-    best_t, best_d = _leg_views(best_legs)
-    return TravelMatrices(foot_t, foot_d, pt_t, pt_d, best_t, best_d)
+        foot_leg = _leg_from_route(foot_route, pt=False)
+        pt_leg = _leg_from_route(pt_route, pt=True)
+        if pt_leg.time < foot_leg.time:
+            if include_geometry:
+                pt_route = await calculate_public_transport_route_between(
+                    db,
+                    client,
+                    pts[i],
+                    pts[j],
+                    MAX_TRAVEL_DISTANCE_TO_PUBLIC_TRANSPORT,
+                    MAX_PUBLIC_TRANSPORT_STOPS_TO_CONSIDER,
+                    route_cache,
+                    include_geometry=True,
+                    direct_route=foot_route,
+                )
+            return _leg_from_route(pt_route, pt=True)
+
+        if include_geometry:
+            foot_route = await calculate_route_between(
+                client,
+                pts[i],
+                pts[j],
+                EProfile.Foot,
+                route_cache,
+                include_geometry=True,
+            )
+        return _leg_from_route(foot_route, pt=False)
+
+    return TravelMatrices(AsyncLazyMatrix(n, leg))
 
 
 def cost_g(node: SearchNode) -> float:
@@ -409,17 +480,6 @@ async def expand_node(
                 )
             )
     return out
-
-
-async def foot_geometry_for_visit_order(
-    client: httpx.AsyncClient,
-    attractions: list[Attraction],
-    visits: tuple[VisitDecision, ...],
-    route_cache: RouteCache[RouteSummary] | None = None,
-) -> list[tuple[float, float]]:
-    waypoints = [attractions[0].position]
-    waypoints.extend(attractions[v.attraction_index].position for v in visits)
-    return await stitch_foot_route_geometry(client, waypoints, route_cache)
 
 
 async def optimize_route(

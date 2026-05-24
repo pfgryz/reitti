@@ -1,9 +1,6 @@
 from typing import Literal
 
-import httpx
-
 from core import Point
-from core.route_cache import RouteCache
 from core.route_optimizer import (
     Attraction,
     AttractionType,
@@ -12,10 +9,10 @@ from core.route_optimizer import (
     RouteOptimizationResult,
     StayBounds,
     StaySelectionMode,
+    TravelLeg,
     TravelMatrices,
-    VisitDecision,
 )
-from core.routing import EProfile, RouteSummary, RoutingError, calculate_route_between
+from core.routing import RoutingError
 from pydantic import BaseModel
 
 
@@ -66,13 +63,24 @@ class VisitOutput(BaseModel):
     stay_minutes: float
 
 
-class FootLegOutput(BaseModel):
-    mode: Literal["foot"] = "foot"
+class StopOutput(BaseModel):
+    name: str
+    lat: float
+    lon: float
+
+
+class LegOutput(BaseModel):
+    mode: Literal["foot", "public_transport"]
     from_index: int
     to_index: int
     travel_time: float
     walk_distance: float
-    points: list[tuple[float, float]]
+    distance: float
+    points: list[tuple[float, float]] | None = None
+    walk_to: list[tuple[float, float]] | None = None
+    walk_from: list[tuple[float, float]] | None = None
+    from_stop: StopOutput | None = None
+    to_stop: StopOutput | None = None
 
 
 class TripOptimizeResponse(BaseModel):
@@ -80,51 +88,40 @@ class TripOptimizeResponse(BaseModel):
     end_time: float
     travel_time: float
     walk_distance: float
-    legs: list[FootLegOutput] | None = None
+    distance: float
+    legs: list[LegOutput] | None = None
 
 
-async def _build_foot_legs(
-    attractions: list[Attraction],
-    visits: tuple[VisitDecision, ...],
-    matrices: TravelMatrices,
-    client: httpx.AsyncClient,
-    route_cache: RouteCache[RouteSummary],
-) -> list[FootLegOutput]:
-    legs: list[FootLegOutput] = []
-    prev = 0
-    for visit in visits:
-        to_idx = visit.attraction_index
-        route = await calculate_route_between(
-            client,
-            attractions[prev].position,
-            attractions[to_idx].position,
-            EProfile.Foot,
-            route_cache,
-            include_geometry=True,
-        )
-        if not route.points:
-            raise RoutingError("Foot route leg is missing geometry")
-        legs.append(
-            FootLegOutput(
-                from_index=prev,
-                to_index=to_idx,
-                travel_time=await matrices.travel_time.get(prev, to_idx),
-                walk_distance=await matrices.walk_dist.get(prev, to_idx),
-                points=route.points,
-            )
-        )
-        prev = to_idx
-    return legs
+def _leg_output(prev: int, to_idx: int, leg: TravelLeg) -> LegOutput:
+    base = dict(
+        mode=leg.mode,
+        from_index=prev,
+        to_index=to_idx,
+        travel_time=leg.time,
+        walk_distance=leg.walk_distance,
+        distance=leg.distance,
+    )
+    if leg.mode == "foot":
+        if not leg.points:
+            raise RoutingError(f"Leg {prev}->{to_idx} is missing geometry")
+        return LegOutput(**base, points=list(leg.points))
+    if not leg.pt:
+        raise RoutingError(f"Leg {prev}->{to_idx} is missing public transport details")
+    p = leg.pt
+    return LegOutput(
+        **base,
+        walk_to=list(p.walk_to),
+        walk_from=list(p.walk_from),
+        from_stop=StopOutput(name=p.from_stop.name, lat=p.from_stop.lat, lon=p.from_stop.lon),
+        to_stop=StopOutput(name=p.to_stop.name, lat=p.to_stop.lat, lon=p.to_stop.lon),
+    )
 
 
 async def from_result(
     result: RouteOptimizationResult,
     matrices: TravelMatrices,
-    attractions: list[Attraction],
     *,
     include_legs: bool = False,
-    client: httpx.AsyncClient | None = None,
-    route_cache: RouteCache[RouteSummary] | None = None,
 ) -> TripOptimizeResponse:
     visits = [
         VisitOutput(
@@ -137,24 +134,23 @@ async def from_result(
     ]
     travel_time = 0.0
     walk_distance = 0.0
+    distance = 0.0
+    legs: list[LegOutput] | None = [] if include_legs else None
     prev = 0
     for v in result.visits:
-        travel_time += await matrices.travel_time.get(prev, v.attraction_index)
-        walk_distance += await matrices.walk_dist.get(prev, v.attraction_index)
+        leg = await matrices.legs.get(prev, v.attraction_index)
+        travel_time += leg.time
+        walk_distance += leg.walk_distance
+        distance += leg.distance
+        if include_legs:
+            legs.append(_leg_output(prev, v.attraction_index, leg))
         prev = v.attraction_index
-
-    legs = None
-    if include_legs:
-        if client is None or route_cache is None:
-            raise ValueError("client and route_cache are required when include_legs is true")
-        legs = await _build_foot_legs(
-            attractions, result.visits, matrices, client, route_cache
-        )
 
     return TripOptimizeResponse(
         visits=visits,
         end_time=result.end_time,
         travel_time=travel_time,
         walk_distance=walk_distance,
+        distance=distance,
         legs=legs,
     )

@@ -23,7 +23,7 @@ async def test_async_lazy_matrix_and_field_view() -> None:
 
     async def fetch(i: int, j: int) -> TravelLeg:
         calls.append((i, j))
-        return TravelLeg(time=float(i), distance=float(j * 100))
+        return TravelLeg(float(i), float(j * 100), float(j * 100))
 
     source = AsyncLazyMatrix(2, fetch)
     times = AsyncMatrixFieldView(source, "time")

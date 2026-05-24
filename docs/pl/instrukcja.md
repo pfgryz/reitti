@@ -66,11 +66,12 @@ Ekran dzieli się na **panel po lewej** (ustawienia wycieczki) i **mapę** (Open
 
 - **Punkt startowy** - wpisz nazwę i wybierz miejsce z listy (domyślnie: Dworzec Główny, Helsinki).
 - **Godzina rozpoczęcia / zakończenia** - w jakich godzinach ma zmieścić się cała wycieczka (np. 09:00-18:00).
+- **Dzień wycieczki** - dzień tygodnia, dla którego liczone są godziny otwarcia i optymalizacja trasy (domyślnie: dzisiejszy).
 
 ### 2. Dodawanie atrakcji
 
 - W polu „Dodaj miejsce” wpisz fragment nazwy i wybierz punkt z listy.
-- Zobaczysz **godziny otwarcia**; bieżący dzień tygodnia jest wyróżniony.
+- Zobaczysz **godziny otwarcia**; wybrany dzień wycieczki jest wyróżniony.
 - Ustaw **czas pobytu** (od-do w godzinach, co pół godziny), np. 1-2 h w muzeum.
 - Kliknij **Dodaj do listy**. Miejsca można usuwać z listy „Wybrane miejsca”.
 

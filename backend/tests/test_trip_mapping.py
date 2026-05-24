@@ -1,7 +1,15 @@
 import pytest
 
 from app.schemas.trip import TripOptimizeRequest, from_result
-from core.route_optimizer import AttractionType, RouteOptimizationResult, VisitDecision
+from core.route_optimizer import (
+    AttractionType,
+    LegStop,
+    PtDetails,
+    RouteOptimizationResult,
+    TravelLeg,
+    TravelMatrices,
+    VisitDecision,
+)
 
 
 def test_to_problem():
@@ -33,18 +41,12 @@ def test_to_problem():
     assert p.attractions[1].type == AttractionType.MUSEUM
 
 
-class _FakeMatrixView:
-    def __init__(self, values: dict[tuple[int, int], float]) -> None:
-        self._values = values
+class _FakeLegs:
+    def __init__(self, legs: dict[tuple[int, int], TravelLeg]) -> None:
+        self._legs = legs
 
-    async def get(self, i: int, j: int) -> float:
-        return self._values[(i, j)]
-
-
-class _FakeMatrices:
-    def __init__(self) -> None:
-        self.travel_time = _FakeMatrixView({(0, 1): 12.0, (1, 2): 8.0})
-        self.walk_dist = _FakeMatrixView({(0, 1): 100.0, (1, 2): 50.0})
+    async def get(self, i: int, j: int) -> TravelLeg:
+        return self._legs[(i, j)]
 
 
 @pytest.mark.asyncio
@@ -56,13 +58,57 @@ async def test_from_result_maps_visits_and_totals() -> None:
         ),
         end_time=1080.0,
     )
-    response = await from_result(result, _FakeMatrices(), [])  # type: ignore[arg-type]
+    matrices = TravelMatrices(
+        _FakeLegs(
+            {
+                (0, 1): TravelLeg(12, 100, 100, "foot"),
+                (1, 2): TravelLeg(8, 50, 50, "foot"),
+            }
+        )
+    )
+    response = await from_result(result, matrices, include_legs=False)
 
     assert response.end_time == 1080.0
     assert response.travel_time == 20.0
     assert response.walk_distance == 150.0
+    assert response.distance == 150.0
     assert len(response.visits) == 2
     assert response.visits[0].attraction_index == 1
     assert response.visits[0].arrival_time == 610.0
     assert response.visits[0].departure_time == 655.0
     assert response.visits[0].stay_minutes == 45.0
+
+
+@pytest.mark.asyncio
+async def test_from_result_builds_legs() -> None:
+    result = RouteOptimizationResult(
+        (VisitDecision(1, 600.0, 690.0),),
+        end_time=1080.0,
+    )
+    matrices = TravelMatrices(
+        _FakeLegs(
+            {
+                (0, 1): TravelLeg(
+                    15,
+                    15000,
+                    400,
+                    "public_transport",
+                    pt=PtDetails(
+                        walk_to=((60.17, 24.94), (60.18, 24.95)),
+                        walk_from=((60.28, 25.03), (60.29, 25.04)),
+                        from_stop=LegStop("A", 60.18, 24.95),
+                        to_stop=LegStop("B", 60.28, 25.03),
+                    ),
+                ),
+            }
+        )
+    )
+    response = await from_result(result, matrices, include_legs=True)
+
+    assert response.legs is not None
+    leg = response.legs[0]
+    assert leg.mode == "public_transport"
+    assert leg.walk_distance == 400.0
+    assert leg.walk_to is not None
+    assert leg.from_stop is not None
+    assert leg.points is None

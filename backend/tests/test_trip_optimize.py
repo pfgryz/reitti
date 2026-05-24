@@ -3,9 +3,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.schemas.trip import FootLegOutput
 from core.dependencies import get_client, get_db, get_route_cache
-from core.route_optimizer import RouteOptimizationError, RouteOptimizationResult, VisitDecision
+from core.route_optimizer import (
+    LegStop,
+    PtDetails,
+    RouteOptimizationError,
+    RouteOptimizationResult,
+    TravelLeg,
+    TravelMatrices,
+    VisitDecision,
+)
 from main import app
 
 client = TestClient(app)
@@ -41,19 +48,31 @@ VALID_BODY = {
 }
 
 
-class _FakeMatrixView:
-    def __init__(self, values: dict[tuple[int, int], float]) -> None:
-        self._values = values
+class _FakeLegs:
+    def __init__(self, leg: TravelLeg) -> None:
+        self._leg = leg
 
-    async def get(self, i: int, j: int) -> float:
-        return self._values.get((i, j), 0.0)
+    async def get(self, i: int, j: int) -> TravelLeg:
+        return self._leg
 
 
-def _fake_matrices() -> MagicMock:
-    matrices = MagicMock()
-    matrices.travel_time = _FakeMatrixView({(0, 1): 15.0})
-    matrices.walk_dist = _FakeMatrixView({(0, 1): 250.0})
-    return matrices
+def _pt_leg() -> TravelLeg:
+    return TravelLeg(
+        15.0,
+        15000.0,
+        250.0,
+        "public_transport",
+        pt=PtDetails(
+            walk_to=((60.17, 24.94), (60.18, 24.95)),
+            walk_from=((60.28, 25.03), (60.29, 25.04)),
+            from_stop=LegStop("Stop A", 60.18, 24.95),
+            to_stop=LegStop("Stop B", 60.28, 25.03),
+        ),
+    )
+
+
+def _fake_matrices() -> TravelMatrices:
+    return TravelMatrices(_FakeLegs(_pt_leg()))
 
 
 def test_optimize_trip_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,6 +97,7 @@ def test_optimize_trip_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert data["end_time"] == 1080.0
     assert data["travel_time"] == 15.0
     assert data["walk_distance"] == 250.0
+    assert data["distance"] == 15000.0
     assert len(data["visits"]) == 1
     visit = data["visits"][0]
     assert visit["attraction_index"] == 1
@@ -113,15 +133,6 @@ def test_optimize_trip_include_legs(monkeypatch: pytest.MonkeyPatch) -> None:
         (VisitDecision(1, 600.0, 690.0),),
         end_time=1080.0,
     )
-    fake_legs = [
-        FootLegOutput(
-            from_index=0,
-            to_index=1,
-            travel_time=15.0,
-            walk_distance=250.0,
-            points=[(60.17, 24.94), (60.18, 24.93)],
-        )
-    ]
 
     monkeypatch.setattr(
         "app.routers.trip.optimize_route",
@@ -131,20 +142,18 @@ def test_optimize_trip_include_legs(monkeypatch: pytest.MonkeyPatch) -> None:
         "app.routers.trip.create_travel_matrices",
         MagicMock(return_value=_fake_matrices()),
     )
-    monkeypatch.setattr(
-        "app.schemas.trip._build_foot_legs",
-        AsyncMock(return_value=fake_legs),
-    )
 
     body = {**VALID_BODY, "include_legs": True}
     response = client.post("/trip/optimize", json=body)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["legs"] is not None
-    assert len(data["legs"]) == 1
-    assert data["legs"][0]["mode"] == "foot"
-    assert data["legs"][0]["points"] == [[60.17, 24.94], [60.18, 24.93]]
+    leg = data["legs"][0]
+    assert leg["mode"] == "public_transport"
+    assert leg["walk_to"] == [[60.17, 24.94], [60.18, 24.95]]
+    assert leg["walk_from"] == [[60.28, 25.03], [60.29, 25.04]]
+    assert leg["from_stop"]["name"] == "Stop A"
+    assert leg["points"] is None
 
 
 def test_optimize_trip_no_route(monkeypatch: pytest.MonkeyPatch) -> None:

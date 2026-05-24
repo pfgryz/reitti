@@ -27,7 +27,6 @@ from core.route_optimizer import (
     optimize_route,
     optimize_route_instrumented,
     passes_pruning,
-    select_optimal_leg,
     stay_options,
     trip_end,
     validate_preliminary_feasibility,
@@ -52,8 +51,10 @@ def spot(
     )
 
 
-def route_summary(distance: float, time: float) -> RouteSummary:
-    return RouteSummary(distance=distance, time=time)
+def route_summary(
+    distance: float, time: float, *, walk_distance: float | None = None
+) -> RouteSummary:
+    return RouteSummary(distance=distance, time=time, walk_distance=walk_distance)
 
 
 def fake_matrices(
@@ -64,16 +65,13 @@ def fake_matrices(
 ) -> TravelMatrices:
     async def fetch(i: int, j: int) -> TravelLeg:
         if i == j:
-            return TravelLeg(time=0.0, distance=0.0)
+            return TravelLeg(0.0, 0.0, 0.0)
         d = meters
         if edges:
             d = edges[(i, j)] if (i, j) in edges else edges[(j, i)]
-        return TravelLeg(time=minutes, distance=d)
+        return TravelLeg(time=minutes, distance=d, walk_distance=d)
 
-    legs = AsyncLazyMatrix(n, fetch)
-    t = AsyncMatrixFieldView(legs, "time")
-    d = AsyncMatrixFieldView(legs, "distance")
-    return TravelMatrices(t, d, t, d, t, d)
+    return TravelMatrices(AsyncLazyMatrix(n, fetch))
 
 
 @pytest.mark.asyncio
@@ -141,15 +139,6 @@ def test_passes_pruning(
     assert passes_pruning(departure, a, travel, trip_end) is ok
 
 
-def test_select_optimal_leg() -> None:
-    foot = TravelLeg(time=20, distance=1500)
-    pt = TravelLeg(time=12, distance=400)
-    assert select_optimal_leg(foot, pt) == pt
-    tie = TravelLeg(time=10, distance=800)
-    assert select_optimal_leg(tie, TravelLeg(time=10, distance=300)) == tie
-    assert select_optimal_leg(foot, None) == foot
-
-
 @pytest.mark.asyncio
 async def test_h_stay_experimental() -> None:
     attrs = [spot(close=200, max_stay=100), spot(close=50, max_stay=80, kind=AttractionType.PARK)]
@@ -182,7 +171,7 @@ async def test_create_travel_matrices(monkeypatch: pytest.MonkeyPatch) -> None:
         return route_summary(1000, 1200)
 
     async def pt(*_a, **_k):
-        return route_summary(250, 480)
+        return route_summary(15000, 480, walk_distance=250)
 
     monkeypatch.setattr("core.route_optimizer.calculate_route_between", foot)
     monkeypatch.setattr(
@@ -190,8 +179,11 @@ async def test_create_travel_matrices(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     m = create_travel_matrices(attrs, client=MagicMock(), db=MagicMock(), route_cache=RouteCache())
 
+    leg = await m.legs.get(0, 1)
+    assert leg.mode == "public_transport"
     assert await m.travel_time.get(0, 1) == pytest.approx(8.0)
     assert await m.walk_dist.get(0, 1) == pytest.approx(250.0)
+    assert leg.distance == pytest.approx(15000.0)
     assert m.travel_time.is_cached(0, 1)
 
 
