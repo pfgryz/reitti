@@ -1,6 +1,6 @@
 # Reitti Backend
 
-API docs (OpenAPI): http://127.0.0.1:8000/docs when `just dev-server` is running. Contract summary: `docs/pl/implementacja.md` (section API HTTP).
+API docs (OpenAPI): http://127.0.0.1:8000/docs when `just dev-server` is running. Contract summary: `docs/pl/dokumentacja.md` (section Implementacja, API HTTP).
 
 ## Development
 To run the development server, use the following command:
