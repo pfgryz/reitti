@@ -5,6 +5,7 @@ import {
   hoursToMinutes,
   minutesToTimeString,
   parseOpeningHoursForDay,
+  narrowOpeningHours,
   timeStringToMinutes
 } from '../src/utils/time.js'
 import { formatDistanceMeters } from '../src/utils/distance.js'
@@ -37,7 +38,7 @@ function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0, vis
     : (() => {
         const oh = parseOpeningHoursForDay(place.hours, visitDay)
         if (!oh || oh.closed) return null
-        return { open: oh.open, close: oh.close }
+        return narrowOpeningHours(oh, place.visitFrom, place.visitTo)
       })()
 
   if (!opening_hours) return null
@@ -53,6 +54,14 @@ function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0, vis
 
 function findClosedOnDay(places, visitDay) {
   return places.filter(p => parseOpeningHoursForDay(p.hours, visitDay)?.closed)
+}
+
+function findInvalidVisitWindow(places, visitDay) {
+  return places.filter(p => {
+    if (!p.visitFrom || !p.visitTo) return false
+    const oh = parseOpeningHoursForDay(p.hours, visitDay)
+    return !oh || oh.closed || !narrowOpeningHours(oh, p.visitFrom, p.visitTo)
+  })
 }
 
 function buildOptimizeBody(startTime, endTime, startPoint, attractions, visitDay) {
@@ -252,6 +261,13 @@ export const useRouteStore = defineStore('route', () => {
     clearRouteResult()
   }
 
+  const updateAttraction = (id, patch) => {
+    const item = attractions.value.find(a => a.id === id)
+    if (!item) return
+    Object.assign(item, patch)
+    clearRouteResult()
+  }
+
   const calculateRoute = async () => {
     isLoading.value = true
     error.value = null
@@ -259,6 +275,13 @@ export const useRouteStore = defineStore('route', () => {
     const closed = findClosedOnDay(attractions.value, visitDay.value)
     if (closed.length) {
       error.value = `Zamknięte w wybrany dzień: ${closed.map(p => p.name).join(', ')}`
+      isLoading.value = false
+      return
+    }
+
+    const invalidWindow = findInvalidVisitWindow(attractions.value, visitDay.value)
+    if (invalidWindow.length) {
+      error.value = `Nieprawidłowy przedział wizyty: ${invalidWindow.map(p => p.name).join(', ')}`
       isLoading.value = false
       return
     }
@@ -324,6 +347,6 @@ export const useRouteStore = defineStore('route', () => {
   return {
     helsinkiPlaces, startPoint, startTime, endTime, visitDay, attractions,
     isRouteCalculated, isLoading, error, totalDuration, totalTravelTime, totalWaitTime, totalWalkDistance, visitOrder, mapCenter, routePolyline, routeSegments,
-    addAttraction, removeAttraction, clearRouteResult, setVisitDay, calculateRoute
+    addAttraction, removeAttraction, updateAttraction, clearRouteResult, setVisitDay, calculateRoute
   }
 })

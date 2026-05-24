@@ -92,6 +92,17 @@
 
         <div class="time-row mt-2">
           <div class="input-group">
+            <label><Clock class="icon-xs text-muted" /> Wizyta od:</label>
+            <input type="time" v-model="newAttraction.visitFrom" class="modern-input" :disabled="!previewPlace" />
+          </div>
+          <div class="input-group">
+            <label><Clock class="icon-xs text-muted" /> Wizyta do:</label>
+            <input type="time" v-model="newAttraction.visitTo" class="modern-input" :disabled="!previewPlace" />
+          </div>
+        </div>
+
+        <div class="time-row mt-2">
+          <div class="input-group">
             <label><Clock class="icon-xs text-muted" /> Czas od (h):</label>
             <input type="number" step="0.5" min="0" v-model="newAttraction.stayMin" class="modern-input" />
           </div>
@@ -112,7 +123,22 @@
           <li v-for="item in store.attractions" :key="item.id" class="attraction-item">
             <div class="attraction-info">
               <strong>{{ item.name }}</strong>
-              <span class="text-sm text-muted"><Clock class="icon-xs" /> {{ item.stayMin }} - {{ item.stayMax }}h</span>
+              <span class="text-sm text-muted"><Clock class="icon-xs" /> Pobyt {{ item.stayMin }}–{{ item.stayMax }} h</span>
+              <div class="visit-window-row">
+                <input
+                  type="time"
+                  class="modern-input visit-window-input"
+                  :value="item.visitFrom"
+                  @change="store.updateAttraction(item.id, { visitFrom: $event.target.value })"
+                />
+                <span class="text-sm text-muted">–</span>
+                <input
+                  type="time"
+                  class="modern-input visit-window-input"
+                  :value="item.visitTo"
+                  @change="store.updateAttraction(item.id, { visitTo: $event.target.value })"
+                />
+              </div>
             </div>
             <button class="btn-icon btn-danger" @click="store.removeAttraction(item.id)" title="Usuń">
               <Trash2 class="icon-sm" />
@@ -227,6 +253,8 @@
                     <span>{{ h.label }}</span><span>{{ h.time }}</span>
                   </li>
                 </ul>
+                <p v-if="item.visitFrom && item.visitTo" class="popup-subtitle mt-1">Preferowany przedział</p>
+                <p v-if="item.visitFrom && item.visitTo" class="text-sm">{{ item.visitFrom }} – {{ item.visitTo }}</p>
               </template>
             </div>
           </l-popup>
@@ -288,6 +316,7 @@ import {
   Plus, Trash2, Navigation, Settings,
   List, CheckCircle2, MapPinPlus
 } from 'lucide-vue-next'
+import { parseOpeningHoursForDay, minutesToTimeString } from './utils/time.js'
 
 const weekdays = [
   { day: 1, label: 'Poniedziałek' },
@@ -367,8 +396,21 @@ const selectStartPlace = (place) => {
 const newAttraction = reactive({
   name: '',
   stayMin: 1,
-  stayMax: 2
+  stayMax: 2,
+  visitFrom: '',
+  visitTo: ''
 })
+
+const setDefaultVisitWindow = (place) => {
+  const oh = parseOpeningHoursForDay(place.hours, store.visitDay)
+  if (oh && !oh.closed) {
+    newAttraction.visitFrom = minutesToTimeString(oh.open)
+    newAttraction.visitTo = minutesToTimeString(oh.close)
+  } else {
+    newAttraction.visitFrom = ''
+    newAttraction.visitTo = ''
+  }
+}
 
 const filteredPlaces = computed(() => {
   const query = newAttraction.name.toLowerCase()
@@ -378,6 +420,8 @@ const filteredPlaces = computed(() => {
 
 const selectPlace = (placeName) => {
   newAttraction.name = placeName
+  const place = store.helsinkiPlaces.find(p => p.name === placeName)
+  if (place) setDefaultVisitWindow(place)
 }
 
 const previewPlace = computed(() => {
@@ -385,10 +429,21 @@ const previewPlace = computed(() => {
   return store.helsinkiPlaces.find(p => p.name === newAttraction.name) || null
 })
 
+watch(
+  () => [store.visitDay, previewPlace.value?.id],
+  () => {
+    if (previewPlace.value) setDefaultVisitWindow(previewPlace.value)
+  }
+)
+
 const handleAddAttraction = () => {
   const foundPlace = store.helsinkiPlaces.find(p => p.name === newAttraction.name)
   if (!foundPlace) {
     alert('Proszę wybrać poprawne miejsce z listy podpowiedzi!')
+    return
+  }
+  if (!newAttraction.visitFrom || !newAttraction.visitTo) {
+    alert('Ustaw przedział godzin wizyty.')
     return
   }
   store.addAttraction({
@@ -400,6 +455,8 @@ const handleAddAttraction = () => {
   newAttraction.name = ''
   newAttraction.stayMin = 1
   newAttraction.stayMax = 2
+  newAttraction.visitFrom = ''
+  newAttraction.visitTo = ''
 }
 </script>
 
@@ -519,11 +576,14 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
 
 .attraction-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .attraction-item {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: flex-start;
   padding: 12px; background: var(--bg-app); border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
 }
-.attraction-info { display: flex; flex-direction: column; gap: 4px; }
+.attraction-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.visit-window-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.visit-window-input { padding: 6px 8px; font-size: 0.85rem; flex: 1; min-width: 0; }
+.mt-1 { margin-top: 6px; }
 .text-sm { font-size: 0.85rem; }
 .text-muted { color: var(--text-muted); }
 

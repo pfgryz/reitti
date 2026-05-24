@@ -48,3 +48,18 @@ export function parseOpeningHoursForDay(hoursList, day = new Date().getDay()) {
   if (!entry) return null
   return parseOpeningHoursString(entry.time)
 }
+
+export function narrowOpeningHours(openingHours, visitFrom, visitTo) {
+  if (!openingHours || openingHours.closed) return null
+  if (!visitFrom || !visitTo) return openingHours
+
+  const from = timeStringToMinutes(visitFrom)
+  const to = timeStringToMinutes(visitTo)
+  if (from >= to) return null
+
+  const open = Math.max(openingHours.open, from)
+  const close = Math.min(openingHours.close, to)
+  if (open >= close) return null
+
+  return { open, close }
+}
