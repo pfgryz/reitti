@@ -15,15 +15,20 @@ Generated automatically from `experiments/outputs/results.csv` and `experiments/
 - Handpicked validation: `uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity`
 - Real reference: `uv run python -m experiments.app suite=real_reference setup=real_reference matrix.mode=real infra.database_url=... infra.graphhopper_base_url=...`
 
-## Experiment Justification
+## Reading the figures
 
-- **A* greedy vs A* intervals**: checks quality/runtime trade-off from richer stay-time branching.
-- **Ablation (heuristic off)**: isolates value of heuristic guidance in search speed.
-- **Brute-force baseline**: provides reference objective for small/feasible cases.
-- **Boundary cases**: verifies infeasible/timeout handling and robustness.
-- **Synthetic vs real matrices**: tests if trends hold when using true Helsinki routing stack.
+- Each scaling figure has a **relaxed** and **tight** profile panel (time-window pressure). Tight windows prune the search aggressively, so absolute numbers stay much smaller than under relaxed windows.
+- Y-axes are **logarithmic** on scaling plots. A drop or plateau near the right edge of a curve usually means the algorithm hit the timeout on the harder scenarios (see `ok/total` annotation).
+- A **hollow marker** with `k/n` next to it means only `k` out of `n` runs at that `n_attractions` finished within the timeout. The plotted median therefore reflects only the easier survivors and should be read as a lower bound.
+- Concretely: `bruteforce_intervals` peaks around `n=9` relaxed and appears to *drop* at `n=10` purely because 11 of 12 scenarios timed out at `n=10` and only the cheapest one survived.
 
-## Key Tables
+## Practical takeaways
+
+- A* with the interval branching matches greedy A* on quality and stays well under one second up to `n_attractions = 12` on synthetic fixtures (see runtime scaling). At `n=15` the relaxed profile becomes the harder regime and only the tight profile finishes.
+- Brute-force baselines confirm A* is optimal on every solvable case (see optimality-gap table below: max gap is essentially floating-point noise).
+- Real Helsinki-stack runs are dominated by GraphHopper / PostGIS round-trips: walltime is roughly two orders of magnitude above the synthetic fixture for the same `n_attractions`, while the search itself expands the same number of nodes (see real-vs-fixture).
+
+## Key tables
 
 ### Status by mode and experiment
 
@@ -49,49 +54,55 @@ Generated automatically from `experiments/outputs/results.csv` and `experiments/
 | real | astar_greedy | 1.0 | 2755.717 | 533.0 | 3.612 | 2875.748 | 1.0 |
 | real | astar_intervals | 1.0 | 2819.131 | 533.0 | 8.479 | 2875.748 | 1.0 |
 
+### Optimality gap vs brute-force (per algorithm / profile)
+
+| experiment | profile | compared_cases | max_abs_gap | median_abs_gap |
+| --- | --- | --- | --- | --- |
+| astar_greedy | relaxed | 60 | 4.90e-03 | 0.00e+00 |
+| astar_greedy | tight | 60 | 0.00e+00 | 0.00e+00 |
+| astar_intervals | relaxed | 49 | 4.90e-03 | 0.00e+00 |
+| astar_intervals | tight | 60 | 0.00e+00 | 0.00e+00 |
+
 ### Heuristic speedup summary
 
 | mode | mean_speedup_vs_no_heuristic | sample_count |
 | --- | --- | --- |
 | fixture | 85.143 | 144 |
 
-### Feasibility correctness summary
+### Feasibility correctness summary (handpicked boundary suite)
 
 | mode | checked_cases | correct_cases | correct_rate |
 | --- | --- | --- | --- |
 | fixture | 17 | 16 | 0.941 |
 
-## Final Plots
+## Final plots
 
-### Runtime Scaling
+### Runtime scaling (fixture)
 
-![runtime scaling](figures/experiments/runtime_scaling.png)
+![Runtime scaling (fixture)](figures/experiments/runtime_scaling.png)
 
-### Expanded Nodes Scaling
+### Memory scaling (fixture)
 
-![expanded nodes scaling](figures/experiments/expanded_nodes_scaling.png)
+![Memory scaling (fixture)](figures/experiments/memory_scaling.png)
 
-### Memory Scaling
+### Real vs fixture runtime
 
-![memory scaling](figures/experiments/memory_scaling.png)
+![Real vs fixture runtime](figures/experiments/real_vs_fixture.png)
 
-### Quality Boxplot
+### Real vs fixture memory
 
-![quality boxplot](figures/experiments/quality_boxplot.png)
+![Real vs fixture memory](figures/experiments/real_vs_fixture_memory.png)
 
-### Optimality Gap
 
-![optimality gap](figures/experiments/optimality_gap.png)
+## Appendix: internal search metrics
 
-### Heuristic Ablation
+These figures describe algorithm internals (search effort, heuristic ablation) rather than user-facing performance. They are kept for completeness.
 
-![heuristic ablation](figures/experiments/heuristic_ablation.png)
+### Expanded nodes scaling (fixture)
 
-### Feasibility Matrix
+![Expanded nodes scaling (fixture)](figures/experiments/expanded_nodes_scaling.png)
 
-![feasibility matrix](figures/experiments/feasibility_matrix.png)
+### Heuristic ablation runtime (fixture)
 
-### Real Vs Fixture
-
-![real vs fixture](figures/experiments/real_vs_fixture.png)
+![Heuristic ablation runtime (fixture)](figures/experiments/heuristic_ablation.png)
 
