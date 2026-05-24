@@ -64,7 +64,7 @@ Baza **PostgreSQL z rozszerzeniem PostGIS** przechowuje dane **GTFS** helsiński
 
 ### GraphHopper
 
-Osobna usługa liczy **trasy piesze** na mapie OpenStreetMap (dystans, czas). Backend odpytuje ją przy każdym odcinku pieszym. Parametry profilu pieszego (prędkość, schody, kierunek startu) — w [Założeniach](#założenia).
+Osobna usługa liczy **trasy piesze** na mapie OpenStreetMap (dystans, czas). Backend odpytuje ją przy każdym odcinku pieszym. Parametry profilu pieszego (prędkość, schody, kierunek startu) - w [Założeniach](#założenia).
 
 ### Przykładowy przepływ
 
@@ -121,7 +121,7 @@ Wykonaj polecenia w katalogu głównym repozytorium (kolejność ma znaczenie).
    just frontend-build
    ```
 
-6. **Miejsca na mapie** (opcjonalnie, jeśli brak `backend/data/places.json`) — z katalogu `backend/`:
+6. **Miejsca na mapie** (opcjonalnie, jeśli brak `backend/data/places.json`) - z katalogu `backend/`:
    ```sh
    just extract-places
    ```
@@ -188,22 +188,22 @@ Model komunikacji miejskiej zaczyna się od wyznaczenia przystanków dostępnych
 
 ### Dane wejściowe
 
-- $P = \{p_0, p_1, \ldots, p_n\}$ — zbiór atrakcji do odwiedzenia
-- $p_0$ — punkt początkowy wycieczki (ustalony, odwiedzony na starcie)
-- $[\mathrm{open}_i, \mathrm{close}_i]$ — godziny otwarcia atrakcji $i$
-- $[\mathrm{min\_stay}_i, \mathrm{max\_stay}_i]$ — przedział czasu pobytu w atrakcji $i$
-- $\mathit{start\_time}$ — czas rozpoczęcia wycieczki
-- $\mathit{end\_time}$ — czas zakończenia wycieczki (domyślnie zamknięcie ostatniej odwiedzonej atrakcji)
+- $P = \{p_0, p_1, \ldots, p_n\}$ - zbiór atrakcji do odwiedzenia
+- $p_0$ - punkt początkowy wycieczki (ustalony, odwiedzony na starcie)
+- $[\mathrm{open}_i, \mathrm{close}_i]$ - godziny otwarcia atrakcji $i$
+- $[\mathrm{min\_stay}_i, \mathrm{max\_stay}_i]$ - przedział czasu pobytu w atrakcji $i$
+- $\mathit{start\_time}$ - czas rozpoczęcia wycieczki
+- $\mathit{end\_time}$ - czas zakończenia wycieczki (domyślnie zamknięcie ostatniej odwiedzonej atrakcji)
 
 #### Wstępnie wyliczone dane
 
-- $t^{\mathrm{pieszo}}_{ij}$ — czas przejścia pieszo z $i$ do $j$ (GraphHopper, OSM)
-- $t^{\mathrm{km}}_{ij}$ — czas przejazdu komunikacją miejską (KM) z $i$ do $j$ (GTFS, HSL):
+- $t^{\mathrm{pieszo}}_{ij}$ - czas przejścia pieszo z $i$ do $j$ (GraphHopper, OSM)
+- $t^{\mathrm{km}}_{ij}$ - czas przejazdu komunikacją miejską (KM) z $i$ do $j$ (GTFS, HSL):
   - wybór najbliższego przystanku w promieniu 10 min pieszo od $i$
   - wybór najbliższego przystanku w promieniu 10 min pieszo od $j$
   - wybór pary przystanków ze średnim czasem przejazdu (najszybsze połączenie)
   - $t^{\mathrm{km}}_{ij} = t_{\mathrm{walk\_to\_stop}} + t_{\mathrm{transit}} + t_{\mathrm{walk\_from\_stop}}$
-- $d_{ij}$ — dystans pieszy przebyty przy przejściu z $i$ do $j$ (w metrach)
+- $d_{ij}$ - dystans pieszy przebyty przy przejściu z $i$ do $j$ (w metrach)
 
 **Wybór trybu przejazdu dla każdej pary $(i, j)$:**
 
@@ -219,7 +219,7 @@ d_{ij} & \text{gdy pieszo jest szybsze}
 \end{cases}
 $$
 
-> Komunikacja miejska jest modelowana przez średni czas przejazdu między przystankami. Przyjmujemy, że autobus lub tramwaj jest dostępny natychmiast po dojściu do przystanku — pomijamy czas oczekiwania na pojazd.
+> Komunikacja miejska jest modelowana przez średni czas przejazdu między przystankami. Przyjmujemy, że autobus lub tramwaj jest dostępny natychmiast po dojściu do przystanku - pomijamy czas oczekiwania na pojazd.
 
 ### Stan
 
@@ -227,22 +227,22 @@ $$
 s = (u,\, \mathit{Visited},\, t)
 $$
 
-- $u$ — obecna atrakcja (indeks do $P$)
-- $\mathit{Visited}$ — zbiór odwiedzonych atrakcji (reprezentacja: bitmask)
-- $t$ — aktualny czas (moment wyjścia z atrakcji $u$)
+- $u$ - obecna atrakcja (indeks do $P$)
+- $\mathit{Visited}$ - zbiór odwiedzonych atrakcji (reprezentacja: bitmask)
+- $t$ - aktualny czas (moment wyjścia z atrakcji $u$)
 
 #### Wyliczenia poza stanem
 
-- $\mathit{d\_so\_far}$ — sumaryczny dystans pieszy dotychczasowej trasy
-- $\mathit{unused\_so\_far} = \sum_{i \in \mathit{Visited}} (\mathrm{max\_stay}_i - \mathrm{stay}_i)$ — sumaryczny niewykorzystany czas pobytu
+- $\mathit{d\_so\_far}$ - sumaryczny dystans pieszy dotychczasowej trasy
+- $\mathit{unused\_so\_far} = \sum_{i \in \mathit{Visited}} (\mathrm{max\_stay}_i - \mathrm{stay}_i)$ - sumaryczny niewykorzystany czas pobytu
 
 Nie wchodzą do klucza stanu $(u, V, t)$.
 
 ### Zmienne decyzyjne
 
-- $t_{\mathrm{arr}}(i)$ — czas przybycia do atrakcji $i$
-- $t_{\mathrm{dep}}(i)$ — czas odjazdu z atrakcji $i$
-- $\mathrm{stay}_i = t_{\mathrm{dep}}(i) - t_{\mathrm{arr}}(i)$ — czas pobytu w atrakcji $i$
+- $t_{\mathrm{arr}}(i)$ - czas przybycia do atrakcji $i$
+- $t_{\mathrm{dep}}(i)$ - czas odjazdu z atrakcji $i$
+- $\mathrm{stay}_i = t_{\mathrm{dep}}(i) - t_{\mathrm{arr}}(i)$ - czas pobytu w atrakcji $i$
 
 **Wariant zachłanny (deterministyczny):**
 
@@ -273,7 +273,7 @@ Dla rozważanej atrakcji $w$ z bieżącego stanu $s = (u, V, t)$:
    \max(t + \mathit{travel\_time}_{uw},\, \mathrm{open}_w) + \mathrm{min\_stay}_w \le \mathit{end\_time}
    $$
 
-Jeżeli którykolwiek warunek nie jest spełniony — przejście do $w$ jest odcinane.
+Jeżeli którykolwiek warunek nie jest spełniony - przejście do $w$ jest odcinane.
 
 ### Funkcja kosztu
 
@@ -286,7 +286,7 @@ gdzie:
 - $\mathit{d\_so\_far} = \sum_{(i,j) \in \mathrm{route}} \mathit{walk\_dist}_{ij}$
 - $\mathit{unused\_so\_far} = \sum_{i \in \mathit{Visited}} (\mathrm{max\_stay}_i - \mathrm{stay}_i)$
 
-Wagi: $\beta \gg \alpha$ — priorytet leksykograficzny (najpierw maksymalizacja czasu pobytu, potem minimalizacja dystansu).
+Wagi: $\beta \gg \alpha$ - priorytet leksykograficzny (najpierw maksymalizacja czasu pobytu, potem minimalizacja dystansu).
 
 Wartości domyślne: $\alpha = 1{,}0$ (metr), $\beta = 10000{,}0$ (minuta niewykorzystanego pobytu).
 
@@ -340,7 +340,7 @@ Dla $s = (u, V, t)$ i kandydata $w \notin V$:
 
 **Sprawdzenie wstępne (przed A*)**
 
-- Dla każdej atrakcji $i$: sprawdź, czy istnieje jakikolwiek wykonalny czas przyjazdu $t_{\mathrm{arr}} \ge \mathrm{open}_i$ spełniający $t_{\mathrm{arr}} + \mathrm{min\_stay}_i \le \min(\mathrm{close}_i, \mathit{end\_time})$. Jeśli nie — atrakcja $i$ jest indywidualnie niewykonalna.
+- Dla każdej atrakcji $i$: sprawdź, czy istnieje jakikolwiek wykonalny czas przyjazdu $t_{\mathrm{arr}} \ge \mathrm{open}_i$ spełniający $t_{\mathrm{arr}} + \mathrm{min\_stay}_i \le \min(\mathrm{close}_i, \mathit{end\_time})$. Jeśli nie - atrakcja $i$ jest indywidualnie niewykonalna.
 
 **Po nieudanym A***
 
@@ -420,13 +420,13 @@ Przykładowy element:
 | Status | Odpowiedź |
 |--------|-----------|
 | 200 | tablica miejsc |
-| 503 | brak `places.json` — uruchom `just extract-places` |
+| 503 | brak `places.json` - uruchom `just extract-places` |
 
 #### POST `/trip/optimize`
 
 Optymalizacja kolejności odwiedzin. **Wszystkie czasy w minutach od północy** (np. 540 = 09:00). Współrzędne: `lat`, `lon`.
 
-**Walidacja wejścia** (FastAPI/Pydantic): HTTP 422, `detail` jako lista pól — np. brak wymaganego pola, zły typ.
+**Walidacja wejścia** (FastAPI/Pydantic): HTTP 422, `detail` jako lista pól - np. brak wymaganego pola, zły typ.
 
 ### Jednostki i wydajność
 
