@@ -13,6 +13,15 @@ export function minutesToTimeString(minutes) {
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }
 
+export function formatDurationMinutes(minutes) {
+  const total = Math.round(minutes)
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  if (h > 0 && m > 0) return `${h} h ${m} min`
+  if (h > 0) return `${h} h`
+  return `${m} min`
+}
+
 export function parseOpeningHoursString(timeStr) {
   const t = (timeStr || '').trim()
   if (!t) return null

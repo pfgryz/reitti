@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
+  formatDurationMinutes,
   hoursToMinutes,
   minutesToTimeString,
   parseOpeningHoursForDay,
@@ -49,10 +50,11 @@ function buildOptimizeBody(startTime, endTime, startPoint, attractions) {
   }
 }
 
-function polylineFromLegs(legs) {
+function stitchPointSegments(segments) {
   const points = []
-  for (const leg of legs) {
-    for (const [lat, lon] of leg.points) {
+  for (const segment of segments) {
+    if (!segment?.length) continue
+    for (const [lat, lon] of segment) {
       const last = points[points.length - 1]
       if (!last || last[0] !== lat || last[1] !== lon) {
         points.push([lat, lon])
@@ -60,6 +62,29 @@ function polylineFromLegs(legs) {
     }
   }
   return points
+}
+
+function polylineFromOptimizeResponse(data) {
+  if (data.legs?.length) {
+    return stitchPointSegments(data.legs.map(leg => leg.points))
+  }
+  if (data.geometry?.length) return stitchPointSegments([data.geometry])
+  if (data.points?.length) return stitchPointSegments([data.points])
+  return null
+}
+
+function nameForAttractionIndex(index, startPoint, attractions) {
+  if (index === 0) return startPoint.name
+  return attractions[index - 1]?.name ?? `Miejsce ${index}`
+}
+
+function mapVisitsToOrder(visits, startPoint, attractions) {
+  return (visits ?? []).map(v => ({
+    name: nameForAttractionIndex(v.attraction_index, startPoint, attractions),
+    arrival: minutesToTimeString(v.arrival_time),
+    departure: minutesToTimeString(v.departure_time),
+    stay: Math.round(v.stay_minutes ?? v.departure_time - v.arrival_time)
+  }))
 }
 
 export const useRouteStore = defineStore('route', () => {
@@ -104,7 +129,8 @@ export const useRouteStore = defineStore('route', () => {
     { id: 7, name: 'Park Sibeliusa', lat: 60.1821, lng: 24.9134, hours: open24h() },
     { id: 8, name: 'Sobór Uspieński', lat: 60.1683, lng: 24.9599, hours: museumHours() },
     { id: 9, name: 'Muzeum Kiasma', lat: 60.1717, lng: 24.9368, hours: museumHours() },
-    { id: 10, name: 'Linnanmäki (Park rozrywki)', lat: 60.1882, lng: 24.9403, hours: defaultHours() }
+    { id: 10, name: 'Linnanmäki (Park rozrywki)', lat: 60.1882, lng: 24.9403, hours: defaultHours() },
+    { id: 11, name: 'Heureka – centrum nauki, Vantaa', lat: 60.2940, lng: 25.0408, hours: museumHours() }
   ]
 
   const startPoint = ref({
@@ -121,12 +147,15 @@ export const useRouteStore = defineStore('route', () => {
   const isLoading = ref(false)
   const error = ref(null)
   const totalDuration = ref('')
+  const visitOrder = ref([])
   const mapCenter = ref([60.1699, 24.9384])
   const routePolyline = ref([])
 
   const clearRouteResult = () => {
     isRouteCalculated.value = false
     routePolyline.value = []
+    visitOrder.value = []
+    totalDuration.value = ''
     error.value = null
   }
 
@@ -183,20 +212,16 @@ export const useRouteStore = defineStore('route', () => {
       }
 
       isRouteCalculated.value = true
-      totalDuration.value =
-        `Koniec: ${minutesToTimeString(data.end_time)}, marsz: ${Math.round(data.travel_time)} min, ${Math.round(data.walk_distance)} m`
+      visitOrder.value = mapVisitsToOrder(
+        data.visits,
+        startPoint.value,
+        attractions.value
+      )
+      totalDuration.value = formatDurationMinutes(
+        data.end_time - timeStringToMinutes(startTime.value)
+      )
 
-      if (data.legs?.length) {
-        routePolyline.value = polylineFromLegs(data.legs)
-      } else {
-        routePolyline.value = [
-          [startPoint.value.lat, startPoint.value.lng],
-          ...data.visits.map(v => {
-            const a = attractions.value[v.attraction_index - 1]
-            return [a.lat, a.lng]
-          })
-        ]
-      }
+      routePolyline.value = polylineFromOptimizeResponse(data) ?? []
     } catch {
       error.value = 'Nie udało się połączyć z serwerem.'
     } finally {
@@ -206,7 +231,7 @@ export const useRouteStore = defineStore('route', () => {
 
   return {
     helsinkiPlaces, startPoint, startTime, endTime, attractions,
-    isRouteCalculated, isLoading, error, totalDuration, mapCenter, routePolyline,
+    isRouteCalculated, isLoading, error, totalDuration, visitOrder, mapCenter, routePolyline,
     addAttraction, removeAttraction, clearRouteResult, calculateRoute
   }
 })

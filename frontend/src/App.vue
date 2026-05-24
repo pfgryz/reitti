@@ -128,7 +128,16 @@
       <section class="card results" v-if="store.isRouteCalculated">
         <h3 class="section-title text-success"><CheckCircle2 class="icon-sm text-success" /> Sukces</h3>
         <p class="text-sm"><strong>Czas wycieczki:</strong> {{ store.totalDuration }}</p>
-        <p class="text-sm text-muted mt-1">Trasa została zaktualizowana na mapie.</p>
+        <h4 class="results-subtitle">Kolejność odwiedzin</h4>
+        <ol class="visit-order-list">
+          <li v-for="(visit, index) in store.visitOrder" :key="index" class="visit-order-item">
+            <strong>{{ visit.name }}</strong>
+            <span class="text-sm text-muted">
+              {{ visit.arrival }} – {{ visit.departure }}, pobyt {{ visit.stay }} min
+            </span>
+          </li>
+        </ol>
+        <p class="text-sm text-muted mt-2">Trasa została zaktualizowana na mapie.</p>
       </section>
     </aside>
 
@@ -217,8 +226,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useRouteStore } from '../stores/routeStore'
+import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup, LIcon } from '@vue-leaflet/vue-leaflet'
 
@@ -231,6 +241,18 @@ import {
 const currentDay = new Date().getDay()
 
 const store = useRouteStore()
+const map = ref(null)
+
+watch(
+  () => store.routePolyline,
+  async (points) => {
+    if (!points.length) return
+    await nextTick()
+    const leafletMap = map.value?.leafletObject
+    if (!leafletMap) return
+    leafletMap.fitBounds(L.latLngBounds(points), { padding: [32, 32] })
+  }
+)
 
 const startSearch = ref(store.startPoint.name)
 
@@ -421,6 +443,24 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
 .text-muted { color: var(--text-muted); }
 
 .results { background-color: var(--success-bg); border-color: #bbf7d0; }
+.results-subtitle {
+  margin: 12px 0 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.visit-order-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.visit-order-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .error-panel { background-color: #fee2e2; border-color: #fecaca; }
 .text-success { color: var(--success); }
 .text-danger { color: var(--danger); }
