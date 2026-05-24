@@ -7,7 +7,7 @@ from pathlib import Path
 import asyncpg
 import httpx
 from app.frontend import mount_frontend
-from app.routers import distance, stops, trip
+from app.routers import distance, places, stops, trip
 from core.exceptions import ConfigurationError, RouteNotFoundError
 from core.route_cache import RouteCache
 from core.route_optimizer import RouteOptimizationError
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(distance.router)
+app.include_router(places.router)
 app.include_router(stops.router)
 app.include_router(trip.router)
 mount_frontend(app)

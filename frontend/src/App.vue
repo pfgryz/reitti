@@ -6,6 +6,10 @@
         <h2>Reitti</h2>
       </header>
 
+      <section class="card error-panel" v-if="store.placesError">
+        <p class="text-sm">{{ store.placesError }}</p>
+      </section>
+
       <section class="card">
         <h3 class="section-title"><Settings class="icon-sm" />Definicja wycieczki</h3>
 
@@ -54,7 +58,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" ref="addPlaceSection">
         <h3 class="section-title"><MapPinPlus class="icon-sm" />Dodaj miejsce</h3>
 
         <div class="autocomplete-container">
@@ -210,6 +214,9 @@
                   </li>
                 </ul>
               </template>
+              <button type="button" class="btn btn-secondary popup-add-btn" @click="beginAddPlace(place)">
+                <Plus class="icon-xs" /> Dodaj miejsce
+              </button>
             </div>
           </l-popup>
         </l-marker>
@@ -340,6 +347,7 @@ const selectedDayLabel = computed(() =>
   weekdays.find(d => d.day === store.visitDay)?.label ?? ''
 )
 const map = ref(null)
+const addPlaceSection = ref(null)
 
 const routeStops = computed(() => {
   if (!store.isRouteCalculated) return []
@@ -368,7 +376,13 @@ watch(
   }
 )
 
-const startSearch = ref(store.startPoint.name)
+const startSearch = ref('')
+
+watch(
+  () => store.startPoint.name,
+  name => { if (name) startSearch.value = name },
+  { immediate: true }
+)
 
 const availablePlaces = computed(() => {
   if (store.isRouteCalculated) return []
@@ -422,6 +436,14 @@ const selectPlace = (placeName) => {
   newAttraction.name = placeName
   const place = store.helsinkiPlaces.find(p => p.name === placeName)
   if (place) setDefaultVisitWindow(place)
+}
+
+const beginAddPlace = (place) => {
+  newAttraction.name = place.name
+  setDefaultVisitWindow(place)
+  nextTick(() => {
+    addPlaceSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 const previewPlace = computed(() => {
@@ -712,6 +734,13 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
   background-color: var(--primary);
   color: white;
   font-weight: 600;
+}
+
+.popup-add-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
 }
 
 :deep(.leaflet-map-marker) {

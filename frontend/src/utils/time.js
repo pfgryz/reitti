@@ -26,10 +26,10 @@ export function parseOpeningHoursString(timeStr) {
   const t = (timeStr || '').trim()
   if (!t) return null
 
-  if (/całą dobę|24\s*h/i.test(t)) {
+  if (/open 24|całą dobę|24\s*h/i.test(t)) {
     return { open: 0, close: 1440 }
   }
-  if (/zamknięte/i.test(t)) {
+  if (/closed|zamknięte/i.test(t)) {
     return { open: 0, close: 0, closed: true }
   }
 
