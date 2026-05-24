@@ -7,6 +7,7 @@ import {
   parseOpeningHoursForDay,
   timeStringToMinutes
 } from '../src/utils/time.js'
+import { formatDistanceMeters } from '../src/utils/distance.js'
 
 function segmentsFromLeg(leg) {
   if (leg.mode !== 'public_transport') {
@@ -194,6 +195,7 @@ export const useRouteStore = defineStore('route', () => {
   const isLoading = ref(false)
   const error = ref(null)
   const totalDuration = ref('')
+  const totalWalkDistance = ref('')
   const visitOrder = ref([])
   const mapCenter = ref([60.1699, 24.9384])
   const routePolyline = ref([])
@@ -205,6 +207,7 @@ export const useRouteStore = defineStore('route', () => {
     routeSegments.value = []
     visitOrder.value = []
     totalDuration.value = ''
+    totalWalkDistance.value = ''
     error.value = null
   }
 
@@ -276,6 +279,7 @@ export const useRouteStore = defineStore('route', () => {
       totalDuration.value = formatDurationMinutes(
         data.end_time - timeStringToMinutes(startTime.value)
       )
+      totalWalkDistance.value = formatDistanceMeters(data.walk_distance ?? 0)
 
       routeSegments.value = routeSegmentsFromResponse(data)
       routePolyline.value = polylineFromOptimizeResponse(data) ?? []
@@ -288,7 +292,7 @@ export const useRouteStore = defineStore('route', () => {
 
   return {
     helsinkiPlaces, startPoint, startTime, endTime, visitDay, attractions,
-    isRouteCalculated, isLoading, error, totalDuration, visitOrder, mapCenter, routePolyline, routeSegments,
+    isRouteCalculated, isLoading, error, totalDuration, totalWalkDistance, visitOrder, mapCenter, routePolyline, routeSegments,
     addAttraction, removeAttraction, clearRouteResult, setVisitDay, calculateRoute
   }
 })
