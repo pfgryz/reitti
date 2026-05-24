@@ -23,6 +23,12 @@ from core.route_optimizer import (  # noqa: E402
 )
 
 CONF_ROOT = Path(__file__).resolve().parents[2] / "conf"
+GENERATION_MAX_ATTEMPTS = 20
+TIGHT_SHIFT_MIN = 15
+TIGHT_SHIFT_MAX = 45
+TIGHT_WINDOW_FLOOR_MIN = 90
+TIGHT_WINDOW_FLOOR_MAX = 150
+RELAXED_FALLBACK_MARGIN = 30
 
 
 class ExplicitAttractionRow(BaseModel):
@@ -135,8 +141,13 @@ def _sample_window(
         open_at = rng.randint(setup.end_time - 240, setup.end_time - 120)
         return open_at, open_at + rng.randint(15, 30)
     if profile == "tight":
-        open_at = rng.randint(setup.open_start_min + 60, setup.open_start_max + 120)
-        return open_at, open_at + rng.randint(60, 120)
+        open_at = rng.randint(
+            setup.open_start_min + TIGHT_SHIFT_MIN,
+            setup.open_start_max + TIGHT_SHIFT_MAX,
+        )
+        win_min = max(TIGHT_WINDOW_FLOOR_MIN, setup.window_len_min // 2)
+        win_max = max(TIGHT_WINDOW_FLOOR_MAX, setup.window_len_max // 2)
+        return open_at, open_at + rng.randint(win_min, win_max)
     open_at = rng.randint(setup.open_start_min, setup.open_start_max)
     return open_at, open_at + rng.randint(setup.window_len_min, setup.window_len_max)
 
@@ -191,6 +202,94 @@ def _build_problem(
         attractions=attractions,
         end_time=float(setup.end_time),
     )
+
+
+def _is_problem_precheck_feasible(problem: RouteOptimizationInput) -> bool:
+    start = problem.start_time
+    end = problem.end_time
+    if end <= start:
+        return False
+    total_min_stay = 0.0
+    for attraction in problem.attractions[1:]:
+        open_at = max(start, attraction.opening_hours.open)
+        close_at = min(end, attraction.opening_hours.close)
+        min_stay = attraction.stay.min
+        max_stay = attraction.stay.max
+        if min_stay < 0.0 or max_stay < min_stay:
+            return False
+        if close_at - open_at < min_stay:
+            return False
+        total_min_stay += min_stay
+    return total_min_stay <= (end - start)
+
+
+def _build_relaxed_fallback_problem(
+    *, n_attractions: int, seed: int, setup: SetupConfig
+) -> RouteOptimizationInput:
+    rng = random.Random(seed + 9001)
+    start = float(setup.start_time)
+    end = float(setup.end_time)
+    open_at = start + RELAXED_FALLBACK_MARGIN
+    close_at = end - RELAXED_FALLBACK_MARGIN
+    min_stay = float(max(5, min(20, setup.min_stay_min)))
+    max_stay = float(max(min_stay + 10, min_stay))
+    attractions = [
+        _attraction(
+            lat=setup.base_lat,
+            lon=setup.base_lon,
+            open_at=0.0,
+            close_at=24 * 60,
+            min_stay=0.0,
+            max_stay=0.0,
+        )
+    ]
+    for _ in range(1, n_attractions):
+        attractions.append(
+            _attraction(
+                lat=setup.base_lat
+                + rng.uniform(-setup.location_spread, setup.location_spread),
+                lon=setup.base_lon
+                + rng.uniform(-setup.location_spread, setup.location_spread),
+                open_at=open_at,
+                close_at=close_at,
+                min_stay=min_stay,
+                max_stay=max_stay,
+            )
+        )
+    return RouteOptimizationInput(start_time=start, attractions=attractions, end_time=end)
+
+
+def _build_generated_problem(
+    *,
+    n_attractions: int,
+    profile: str,
+    seed: int,
+    setup: SetupConfig,
+) -> RouteOptimizationInput:
+    if profile == "impossible":
+        return _build_problem(
+            n_attractions=n_attractions, profile=profile, seed=seed, setup=setup
+        )
+
+    last_problem: RouteOptimizationInput | None = None
+    for attempt in range(GENERATION_MAX_ATTEMPTS):
+        candidate = _build_problem(
+            n_attractions=n_attractions,
+            profile=profile,
+            seed=seed + attempt * 9973,
+            setup=setup,
+        )
+        if _is_problem_precheck_feasible(candidate):
+            return candidate
+        last_problem = candidate
+
+    if profile == "relaxed":
+        return _build_relaxed_fallback_problem(
+            n_attractions=n_attractions, seed=seed, setup=setup
+        )
+    if last_problem is not None:
+        return last_problem
+    return _build_problem(n_attractions=n_attractions, profile=profile, seed=seed, setup=setup)
 
 
 def _build_explicit_problem(
@@ -417,7 +516,7 @@ def build_scenarios(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenario]
                         profile=profile,
                         suite=suite.name,
                         setup_name=setup.name,
-                        problem=_build_problem(
+                        problem=_build_generated_problem(
                             n_attractions=n,
                             profile=profile,
                             seed=seed,

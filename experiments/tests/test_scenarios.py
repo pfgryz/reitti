@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import experiments.scenarios as scenarios_mod
 from experiments.scenarios import build_scenarios, setup_from_dict, suite_from_dict
 
 
@@ -32,6 +33,46 @@ def test_build_scenarios_is_deterministic() -> None:
     assert [s.id for s in first] == [s.id for s in second]
     assert first[0].suite == "synthetic_main"
     assert first[0].setup_name == "baseline"
+
+
+def test_relaxed_uses_fallback_when_precheck_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        scenarios_mod, "_is_problem_precheck_feasible", lambda _: False
+    )
+    setup = setup_from_dict({}, name="baseline")
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [6],
+            "seed_count": 1,
+            "profiles": ["relaxed"],
+        },
+        name="fallback_check",
+    )
+    scenario = build_scenarios(setup=setup, suite=suite)[0]
+    non_start = scenario.problem.attractions[1:]
+    assert all(a.opening_hours.open == setup.start_time + 30 for a in non_start)
+    assert all(a.opening_hours.close == setup.end_time - 30 for a in non_start)
+
+
+def test_tight_generates_some_precheck_feasible_cases() -> None:
+    setup = setup_from_dict({}, name="baseline")
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [9],
+            "seed_count": 8,
+            "profiles": ["tight"],
+        },
+        name="tight_balance_check",
+    )
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    feasible = sum(
+        1 for s in scenarios if scenarios_mod._is_problem_precheck_feasible(s.problem)
+    )
+    assert feasible > 0
 
 
 def test_build_scenarios_includes_handpicked_from_yaml(tmp_path: Path) -> None:

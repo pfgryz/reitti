@@ -51,15 +51,18 @@ Profiles control how attraction opening windows and stays are sampled in
 `experiments/src/experiments/scenarios.py`.
 
 - `relaxed`
-  - windows sampled from setup baseline ranges (`open_start_*`, `window_len_*`)
-  - usually feasible, good for normal scaling trends
+  - sampled from setup baseline ranges (`open_start_*`, `window_len_*`)
+  - generator retries with a cheap precheck; if all attempts fail, uses deterministic solvable fallback template
+  - intended to be solvable baseline profile
 - `tight`
-  - windows shifted later and shortened (`+60..+120` start shift, `60..120` length)
-  - harder scheduling, exposes pruning/search pressure
+  - windows shifted later and narrowed (so harder than relaxed but not mostly infeasible)
+  - target is harder search with still-frequent feasible cases
 - `impossible`
   - windows near trip end and very short (`15..30` min)
   - stay lower bound forced up (`min_stay >= 30`)
   - intentionally drives `infeasible` outcomes
+
+Important: generation decisions do **not** depend on solver outcome; precheck/fallback happens before solver run.
 
 ### Algorithm variants and what each proves
 
