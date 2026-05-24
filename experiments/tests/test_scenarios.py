@@ -4,19 +4,19 @@ from pathlib import Path
 
 import pytest
 
-import experiments.scenarios as scenarios_mod
-from experiments.scenarios import build_scenarios, setup_from_dict, suite_from_dict
+import random
+
+from experiments.matrices import FixtureMatrixConfig, precompute_fixture_edges
+from experiments.scenarios import (
+    _sample_walkable_tour,
+    build_scenarios,
+    setup_from_dict,
+    suite_from_dict,
+)
 
 
 def test_build_scenarios_is_deterministic() -> None:
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
+    setup = setup_from_dict({}, name="baseline")
     suite = suite_from_dict(
         {
             "variants": ["astar_greedy"],
@@ -35,44 +35,61 @@ def test_build_scenarios_is_deterministic() -> None:
     assert first[0].setup_name == "baseline"
 
 
-def test_relaxed_uses_fallback_when_precheck_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        scenarios_mod, "_is_problem_precheck_feasible", lambda _: False
-    )
+@pytest.mark.parametrize("profile", ["relaxed", "tight"])
+@pytest.mark.parametrize("n", [6, 9, 12])
+def test_generated_scenarios_have_a_feasible_tour_under_runtime_fixture(
+    profile: str, n: int
+) -> None:
+    """Each generated scenario must admit a feasible tour against the same fixture
+    seed the executor will use. We reconstruct that tour with the public helper and
+    walk it against the produced windows. This is the property the old precheck loop
+    failed to guarantee, which produced the runtime CASE-INFEASIBLE warnings."""
     setup = setup_from_dict({}, name="baseline")
     suite = suite_from_dict(
         {
-            "variants": ["astar_greedy"],
+            "variants": ["astar_intervals"],
+            "matrix_mode": "fixture",
+            "n_attractions": [n],
+            "seed_count": 6,
+            "profiles": [profile],
+        },
+        name="feasibility_check",
+    )
+    fixture_cfg = FixtureMatrixConfig()
+    for scenario in build_scenarios(setup=setup, suite=suite, fixture_cfg=fixture_cfg):
+        times, _ = precompute_fixture_edges(
+            scenario.n_attractions, fixture_cfg, seed=scenario.seed
+        )
+        order, arrivals = _sample_walkable_tour(
+            n=scenario.n_attractions,
+            times=times,
+            setup=setup,
+            rng=random.Random(scenario.seed),
+        )
+        for idx, arrival in zip(order, arrivals, strict=True):
+            attr = scenario.problem.attractions[idx]
+            assert attr.opening_hours.open <= arrival + 1e-6, scenario.id
+            finish = arrival + attr.stay.min
+            assert finish <= attr.opening_hours.close + 1e-6, scenario.id
+            assert finish <= scenario.problem.end_time + 1e-6, scenario.id
+
+
+def test_impossible_profile_windows_admit_no_visit() -> None:
+    setup = setup_from_dict({}, name="baseline")
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_intervals"],
             "matrix_mode": "fixture",
             "n_attractions": [6],
-            "seed_count": 1,
-            "profiles": ["relaxed"],
+            "seed_count": 2,
+            "profiles": ["impossible"],
         },
-        name="fallback_check",
+        name="impossible_check",
     )
-    scenario = build_scenarios(setup=setup, suite=suite)[0]
-    non_start = scenario.problem.attractions[1:]
-    assert all(a.opening_hours.open == setup.start_time + 30 for a in non_start)
-    assert all(a.opening_hours.close == setup.end_time - 30 for a in non_start)
-
-
-def test_tight_generates_some_precheck_feasible_cases() -> None:
-    setup = setup_from_dict({}, name="baseline")
-    suite = suite_from_dict(
-        {
-            "variants": ["astar_greedy"],
-            "matrix_mode": "fixture",
-            "n_attractions": [9],
-            "seed_count": 8,
-            "profiles": ["tight"],
-        },
-        name="tight_balance_check",
-    )
-    scenarios = build_scenarios(setup=setup, suite=suite)
-    feasible = sum(
-        1 for s in scenarios if scenarios_mod._is_problem_precheck_feasible(s.problem)
-    )
-    assert feasible > 0
+    for scenario in build_scenarios(setup=setup, suite=suite):
+        for attraction in scenario.problem.attractions[1:]:
+            window = attraction.opening_hours.close - attraction.opening_hours.open
+            assert attraction.stay.min > window
 
 
 def test_build_scenarios_includes_handpicked_from_yaml(tmp_path: Path) -> None:
@@ -91,14 +108,7 @@ def test_build_scenarios_includes_handpicked_from_yaml(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
+    setup = setup_from_dict({}, name="baseline")
     suite = suite_from_dict(
         {
             "variants": ["astar_greedy"],
@@ -207,101 +217,6 @@ def test_build_scenarios_raises_for_explicit_case_without_attractions(
         build_scenarios(setup=setup, suite=suite)
 
 
-def test_build_scenarios_loads_default_relative_handpicked_file() -> None:
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
-    suite = suite_from_dict(
-        {
-            "variants": ["astar_greedy"],
-            "matrix_mode": "fixture",
-            "n_attractions": [],
-            "seed_count": 0,
-            "profiles": [],
-            "include_handpicked": True,
-        },
-        name="handpicked_default",
-    )
-
-    scenarios = build_scenarios(setup=setup, suite=suite)
-    assert [s.id for s in scenarios] == [
-        "boundary_all_impossible",
-        "boundary_single_unreachable",
-        "boundary_empty_only_start",
-        "boundary_timeout_bf",
-    ]
-
-
-def test_boundary_single_unreachable_contains_forced_unreachable_stop() -> None:
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
-    suite = suite_from_dict(
-        {
-            "variants": ["astar_greedy"],
-            "matrix_mode": "fixture",
-            "n_attractions": [],
-            "seed_count": 0,
-            "profiles": [],
-            "include_handpicked": True,
-        },
-        name="handpicked_default",
-    )
-
-    scenarios = build_scenarios(setup=setup, suite=suite)
-    target = next(s for s in scenarios if s.id == "boundary_single_unreachable")
-    assert target.profile == "relaxed"
-    assert target.n_attractions == 6
-    assert len(target.problem.attractions) == 6
-    unreachable = target.problem.attractions[1]
-    assert unreachable.stay.min > 0.0
-    assert (
-        unreachable.opening_hours.open + unreachable.stay.min
-        > unreachable.opening_hours.close
-    )
-
-
-def test_boundary_empty_only_start_keeps_single_start_attraction() -> None:
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
-    suite = suite_from_dict(
-        {
-            "variants": ["astar_greedy"],
-            "matrix_mode": "fixture",
-            "n_attractions": [],
-            "seed_count": 0,
-            "profiles": [],
-            "include_handpicked": True,
-        },
-        name="handpicked_default",
-    )
-
-    scenarios = build_scenarios(setup=setup, suite=suite)
-    target = next(s for s in scenarios if s.id == "boundary_empty_only_start")
-    assert target.profile == "relaxed"
-    assert target.n_attractions == 1
-    assert len(target.problem.attractions) == 1
-    start = target.problem.attractions[0]
-    assert start.stay.min == 0.0
-    assert start.stay.max == 0.0
-
-
 def test_build_scenarios_raises_for_invalid_handpicked_row(tmp_path: Path) -> None:
     handpicked = tmp_path / "invalid_cases.yaml"
     handpicked.write_text(
@@ -317,14 +232,7 @@ def test_build_scenarios_raises_for_invalid_handpicked_row(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
+    setup = setup_from_dict({}, name="baseline")
     suite = suite_from_dict(
         {
             "variants": ["astar_greedy"],
@@ -366,14 +274,7 @@ def test_build_scenarios_raises_for_duplicate_handpicked_ids(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
-    setup = setup_from_dict(
-        {
-            "profiles": ["relaxed", "tight", "impossible"],
-            "n_attractions": [6, 9],
-            "seed_count": 2,
-        },
-        name="baseline",
-    )
+    setup = setup_from_dict({}, name="baseline")
     suite = suite_from_dict(
         {
             "variants": ["astar_greedy"],

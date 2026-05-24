@@ -5,13 +5,15 @@ import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import asyncpg
 import httpx
 
 from . import ensure_backend_path
-from .scenarios import Scenario
+
+if TYPE_CHECKING:
+    from .scenarios import Scenario
 
 ensure_backend_path()
 
@@ -38,13 +40,18 @@ class FixtureMatrixConfig:
 
 class MatrixProvider(Protocol):
     @asynccontextmanager
-    async def acquire(self, scenario: Scenario) -> AsyncIterator[TravelMatrices]:
+    async def acquire(self, scenario: "Scenario") -> AsyncIterator[TravelMatrices]:
         yield fixture_matrices(1, FixtureMatrixConfig())
 
 
-def fixture_matrices(
+def precompute_fixture_edges(
     size: int, config: FixtureMatrixConfig, *, seed: int = 0
-) -> TravelMatrices:
+) -> tuple[list[list[float | None]], list[list[float | None]]]:
+    """Eagerly sample a symmetric travel matrix as a pure function of (size, config, seed).
+
+    Returns (times, dists). Entries are None for disconnected pairs and 0.0 on the diagonal.
+    The pt_faster speedup is baked in here so the runtime matrix has no lazy randomness.
+    """
     rng = random.Random(seed)
     density = min(max(config.density, 0.0), 1.0)
     connected_prob = density * (1.0 - config.disconnected_prob)
@@ -60,29 +67,31 @@ def fixture_matrices(
                 continue
             base_time = rng.uniform(config.time_min, config.time_max)
             base_dist = base_time * rng.uniform(90.0, 140.0)
+            if rng.random() < config.pt_faster_prob:
+                base_time /= rng.uniform(config.pt_speedup_min, config.pt_speedup_max)
             times[i][j] = base_time
             times[j][i] = base_time
             dists[i][j] = base_dist
             dists[j][i] = base_dist
+    return times, dists
+
+
+def fixture_matrices(
+    size: int, config: FixtureMatrixConfig, *, seed: int = 0
+) -> TravelMatrices:
+    times, dists = precompute_fixture_edges(size, config, seed=seed)
 
     async def travel(i: int, j: int) -> TravelLeg:
-        if i == j:
-            return TravelLeg(time=0.0, distance=0.0)
-        time_value = times[i][j]
-        dist_value = dists[i][j]
-        if time_value is None or dist_value is None:
-            # Keep an explicit large edge cost for disconnected pairs.
+        t = times[i][j]
+        d = dists[i][j]
+        if t is None or d is None:
             return TravelLeg(time=1e9, distance=1e9)
-        pt_faster = rng.random() < config.pt_faster_prob
-        if pt_faster:
-            speedup = rng.uniform(config.pt_speedup_min, config.pt_speedup_max)
-            return TravelLeg(time=time_value / speedup, distance=dist_value)
-        return TravelLeg(time=time_value, distance=dist_value)
+        return TravelLeg(time=t, distance=d)
 
     legs = AsyncLazyMatrix(size, travel)
-    t = AsyncMatrixFieldView(legs, "time")
-    d = AsyncMatrixFieldView(legs, "distance")
-    return TravelMatrices(t, d, t, d, t, d)
+    t_view = AsyncMatrixFieldView(legs, "time")
+    d_view = AsyncMatrixFieldView(legs, "distance")
+    return TravelMatrices(t_view, d_view, t_view, d_view, t_view, d_view)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +99,7 @@ class FixtureMatrixProvider:
     config: FixtureMatrixConfig
 
     @asynccontextmanager
-    async def acquire(self, scenario: Scenario) -> AsyncIterator[TravelMatrices]:
+    async def acquire(self, scenario: "Scenario") -> AsyncIterator[TravelMatrices]:
         yield fixture_matrices(
             scenario.n_attractions,
             self.config,
@@ -104,7 +113,7 @@ class RealMatrixProvider:
     graphhopper_base_url: str | None = None
 
     @asynccontextmanager
-    async def acquire(self, scenario: Scenario) -> AsyncIterator[TravelMatrices]:
+    async def acquire(self, scenario: "Scenario") -> AsyncIterator[TravelMatrices]:
         db_url = self.database_url or os.environ.get("DATABASE_URL")
         gh_url = self.graphhopper_base_url or os.environ.get("GRAPHHOPPER_BASE_URL")
         if not db_url or not gh_url:

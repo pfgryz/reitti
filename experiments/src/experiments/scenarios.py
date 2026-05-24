@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -10,6 +9,7 @@ from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError, model_validator
 
 from . import ensure_backend_path
+from .matrices import FixtureMatrixConfig, precompute_fixture_edges
 
 ensure_backend_path()
 
@@ -23,12 +23,11 @@ from core.route_optimizer import (  # noqa: E402
 )
 
 CONF_ROOT = Path(__file__).resolve().parents[2] / "conf"
-GENERATION_MAX_ATTEMPTS = 20
-TIGHT_SHIFT_MIN = 15
-TIGHT_SHIFT_MAX = 45
-TIGHT_WINDOW_FLOOR_MIN = 90
-TIGHT_WINDOW_FLOOR_MAX = 150
-RELAXED_FALLBACK_MARGIN = 30
+TOUR_ATTEMPTS = 50
+TIGHT_WINDOW_SLACK = 5.0
+IMPOSSIBLE_WINDOW_OFFSET = 60.0
+IMPOSSIBLE_WINDOW_LENGTH = 10.0
+IMPOSSIBLE_MIN_STAY = 30.0
 
 
 class ExplicitAttractionRow(BaseModel):
@@ -65,12 +64,10 @@ class HandpickedCaseRow(BaseModel):
         self.id = self.id.strip()
         if not self.id:
             raise ValueError("handpicked case id must be a non-empty string")
-
         if self.case_mode == "generated":
             if self.n_attractions is None or self.n_attractions < 1:
                 raise ValueError("handpicked case n_attractions must be an int >= 1")
             return self
-
         if self.attractions is None:
             raise ValueError("explicit case attractions must be provided as a list")
         return self
@@ -81,14 +78,8 @@ class SetupConfig:
     name: str
     start_time: int
     end_time: int
-    open_start_min: int
-    open_start_max: int
-    window_len_min: int
-    window_len_max: int
-    min_stay_min: int
-    min_stay_max: int
-    extra_max_min: int
-    extra_max_max: int
+    min_stay: int
+    extra_max: int
     base_lat: float
     base_lon: float
     location_spread: float
@@ -134,69 +125,127 @@ def _attraction(
     )
 
 
-def _sample_window(
-    profile: str, rng: random.Random, setup: SetupConfig
-) -> tuple[int, int]:
-    if profile == "impossible":
-        open_at = rng.randint(setup.end_time - 240, setup.end_time - 120)
-        return open_at, open_at + rng.randint(15, 30)
-    if profile == "tight":
-        open_at = rng.randint(
-            setup.open_start_min + TIGHT_SHIFT_MIN,
-            setup.open_start_max + TIGHT_SHIFT_MAX,
-        )
-        win_min = max(TIGHT_WINDOW_FLOOR_MIN, setup.window_len_min // 2)
-        win_max = max(TIGHT_WINDOW_FLOOR_MAX, setup.window_len_max // 2)
-        return open_at, open_at + rng.randint(win_min, win_max)
-    open_at = rng.randint(setup.open_start_min, setup.open_start_max)
-    return open_at, open_at + rng.randint(setup.window_len_min, setup.window_len_max)
+def _origin(setup: SetupConfig) -> Attraction:
+    return _attraction(
+        lat=setup.base_lat,
+        lon=setup.base_lon,
+        open_at=0.0,
+        close_at=24 * 60,
+        min_stay=0.0,
+        max_stay=0.0,
+    )
 
 
-def _sample_stay(
-    profile: str, rng: random.Random, setup: SetupConfig
-) -> tuple[int, int]:
-    min_stay = rng.randint(setup.min_stay_min, setup.min_stay_max)
-    extra = rng.randint(setup.extra_max_min, setup.extra_max_max)
-    max_stay = min_stay + extra
-    if profile == "impossible":
-        min_stay = max(min_stay, 30)
-        max_stay = max(max_stay, min_stay + 10)
-    return min_stay, max_stay
+def _random_position(setup: SetupConfig, rng: random.Random) -> tuple[float, float]:
+    return (
+        setup.base_lat + rng.uniform(-setup.location_spread, setup.location_spread),
+        setup.base_lon + rng.uniform(-setup.location_spread, setup.location_spread),
+    )
 
 
-def _build_problem(
+def _sample_walkable_tour(
     *,
-    n_attractions: int,
+    n: int,
+    times: list[list[float | None]],
+    setup: SetupConfig,
+    rng: random.Random,
+) -> tuple[list[int], list[float]]:
+    """Random-greedy walk from node 0 with restart-on-dead-end retries.
+
+    Each attempt extends the tour by picking uniformly at random from the unvisited
+    nodes that are reachable from the current node and whose minimum stay fits
+    before end_time. Stay time is fixed to setup.min_stay so the tour is the
+    shortest legal one; profile-dependent slack is added later as window padding
+    or as max_stay. Sparse matrices may need several restarts because greedy has
+    no backtracking; the consumed RNG state guarantees that successive attempts
+    explore different choices.
+    """
+    for _ in range(TOUR_ATTEMPTS):
+        result = _attempt_walk(n=n, times=times, setup=setup, rng=rng)
+        if result is not None:
+            return result
+    raise RuntimeError(
+        f"cannot construct a feasible tour for n={n} setup={setup.name} after "
+        f"{TOUR_ATTEMPTS} attempts; widen [start_time, end_time] or matrix density"
+    )
+
+
+def _attempt_walk(
+    *,
+    n: int,
+    times: list[list[float | None]],
+    setup: SetupConfig,
+    rng: random.Random,
+) -> tuple[list[int], list[float]] | None:
+    remaining = set(range(1, n))
+    order: list[int] = []
+    arrivals: list[float] = []
+    current = 0
+    now = float(setup.start_time)
+    while remaining:
+        candidates: list[tuple[int, float]] = []
+        for idx in remaining:
+            travel = times[current][idx]
+            if travel is None:
+                continue
+            arrival = now + travel
+            if arrival + setup.min_stay > setup.end_time:
+                continue
+            candidates.append((idx, arrival))
+        if not candidates:
+            return None
+        idx, arrival = rng.choice(candidates)
+        order.append(idx)
+        arrivals.append(arrival)
+        remaining.remove(idx)
+        current = idx
+        now = arrival + setup.min_stay
+    return order, arrivals
+
+
+def _generated_problem(
+    *,
+    n: int,
     profile: str,
     seed: int,
     setup: SetupConfig,
+    fixture_cfg: FixtureMatrixConfig,
 ) -> RouteOptimizationInput:
+    if profile == "impossible":
+        return _impossible_problem(n=n, setup=setup, seed=seed)
     rng = random.Random(seed)
-    attractions = [
-        _attraction(
-            lat=setup.base_lat,
-            lon=setup.base_lon,
-            open_at=0.0,
-            close_at=24 * 60,
-            min_stay=0.0,
-            max_stay=0.0,
+    attractions: list[Attraction] = [_origin(setup)]
+    if n > 1:
+        times, _ = precompute_fixture_edges(n, fixture_cfg, seed=seed)
+        order, arrivals = _sample_walkable_tour(
+            n=n, times=times, setup=setup, rng=rng
         )
-    ]
-    for _ in range(1, n_attractions):
-        open_at, close_at = _sample_window(profile, rng, setup)
-        min_stay, max_stay = _sample_stay(profile, rng, setup)
-        attractions.append(
-            _attraction(
-                lat=setup.base_lat
-                + rng.uniform(-setup.location_spread, setup.location_spread),
-                lon=setup.base_lon
-                + rng.uniform(-setup.location_spread, setup.location_spread),
-                open_at=open_at,
-                close_at=close_at,
-                min_stay=min_stay,
-                max_stay=max_stay,
+        arrival_by_index = dict(zip(order, arrivals, strict=True))
+        stay = float(setup.min_stay)
+        for idx in range(1, n):
+            arrival = arrival_by_index[idx]
+            finish = arrival + stay
+            if profile == "tight":
+                open_at = max(float(setup.start_time), arrival - TIGHT_WINDOW_SLACK)
+                close_at = min(float(setup.end_time), finish + TIGHT_WINDOW_SLACK)
+                min_stay = stay
+                max_stay = stay
+            else:  # relaxed
+                open_at = float(setup.start_time)
+                close_at = float(setup.end_time)
+                min_stay = stay
+                max_stay = stay + float(setup.extra_max)
+            lat, lon = _random_position(setup, rng)
+            attractions.append(
+                _attraction(
+                    lat=lat,
+                    lon=lon,
+                    open_at=open_at,
+                    close_at=close_at,
+                    min_stay=min_stay,
+                    max_stay=max_stay,
+                )
             )
-        )
     return RouteOptimizationInput(
         start_time=float(setup.start_time),
         attractions=attractions,
@@ -204,95 +253,34 @@ def _build_problem(
     )
 
 
-def _is_problem_precheck_feasible(problem: RouteOptimizationInput) -> bool:
-    start = problem.start_time
-    end = problem.end_time
-    if end <= start:
-        return False
-    total_min_stay = 0.0
-    for attraction in problem.attractions[1:]:
-        open_at = max(start, attraction.opening_hours.open)
-        close_at = min(end, attraction.opening_hours.close)
-        min_stay = attraction.stay.min
-        max_stay = attraction.stay.max
-        if min_stay < 0.0 or max_stay < min_stay:
-            return False
-        if close_at - open_at < min_stay:
-            return False
-        total_min_stay += min_stay
-    return total_min_stay <= (end - start)
-
-
-def _build_relaxed_fallback_problem(
-    *, n_attractions: int, seed: int, setup: SetupConfig
+def _impossible_problem(
+    *, n: int, setup: SetupConfig, seed: int
 ) -> RouteOptimizationInput:
-    rng = random.Random(seed + 9001)
-    start = float(setup.start_time)
+    rng = random.Random(seed)
     end = float(setup.end_time)
-    open_at = start + RELAXED_FALLBACK_MARGIN
-    close_at = end - RELAXED_FALLBACK_MARGIN
-    min_stay = float(max(5, min(20, setup.min_stay_min)))
-    max_stay = float(max(min_stay + 10, min_stay))
-    attractions = [
-        _attraction(
-            lat=setup.base_lat,
-            lon=setup.base_lon,
-            open_at=0.0,
-            close_at=24 * 60,
-            min_stay=0.0,
-            max_stay=0.0,
-        )
-    ]
-    for _ in range(1, n_attractions):
+    open_at = end - IMPOSSIBLE_WINDOW_OFFSET
+    close_at = open_at + IMPOSSIBLE_WINDOW_LENGTH
+    attractions: list[Attraction] = [_origin(setup)]
+    for _ in range(1, n):
+        lat, lon = _random_position(setup, rng)
         attractions.append(
             _attraction(
-                lat=setup.base_lat
-                + rng.uniform(-setup.location_spread, setup.location_spread),
-                lon=setup.base_lon
-                + rng.uniform(-setup.location_spread, setup.location_spread),
+                lat=lat,
+                lon=lon,
                 open_at=open_at,
                 close_at=close_at,
-                min_stay=min_stay,
-                max_stay=max_stay,
+                min_stay=IMPOSSIBLE_MIN_STAY,
+                max_stay=IMPOSSIBLE_MIN_STAY,
             )
         )
-    return RouteOptimizationInput(start_time=start, attractions=attractions, end_time=end)
+    return RouteOptimizationInput(
+        start_time=float(setup.start_time),
+        attractions=attractions,
+        end_time=end,
+    )
 
 
-def _build_generated_problem(
-    *,
-    n_attractions: int,
-    profile: str,
-    seed: int,
-    setup: SetupConfig,
-) -> RouteOptimizationInput:
-    if profile == "impossible":
-        return _build_problem(
-            n_attractions=n_attractions, profile=profile, seed=seed, setup=setup
-        )
-
-    last_problem: RouteOptimizationInput | None = None
-    for attempt in range(GENERATION_MAX_ATTEMPTS):
-        candidate = _build_problem(
-            n_attractions=n_attractions,
-            profile=profile,
-            seed=seed + attempt * 9973,
-            setup=setup,
-        )
-        if _is_problem_precheck_feasible(candidate):
-            return candidate
-        last_problem = candidate
-
-    if profile == "relaxed":
-        return _build_relaxed_fallback_problem(
-            n_attractions=n_attractions, seed=seed, setup=setup
-        )
-    if last_problem is not None:
-        return last_problem
-    return _build_problem(n_attractions=n_attractions, profile=profile, seed=seed, setup=setup)
-
-
-def _build_explicit_problem(
+def _explicit_problem(
     *,
     setup: SetupConfig,
     seed: int,
@@ -301,23 +289,13 @@ def _build_explicit_problem(
     attractions_data: list[dict[str, Any]],
 ) -> RouteOptimizationInput:
     rng = random.Random(seed)
-    attractions = [
-        _attraction(
-            lat=setup.base_lat,
-            lon=setup.base_lon,
-            open_at=0.0,
-            close_at=24 * 60,
-            min_stay=0.0,
-            max_stay=0.0,
-        )
-    ]
+    attractions: list[Attraction] = [_origin(setup)]
     for row in attractions_data:
+        lat, lon = _random_position(setup, rng)
         attractions.append(
             _attraction(
-                lat=setup.base_lat
-                + rng.uniform(-setup.location_spread, setup.location_spread),
-                lon=setup.base_lon
-                + rng.uniform(-setup.location_spread, setup.location_spread),
+                lat=lat,
+                lon=lon,
                 open_at=float(row["open"]),
                 close_at=float(row["close"]),
                 min_stay=float(row["min_stay"]),
@@ -329,75 +307,6 @@ def _build_explicit_problem(
         attractions=attractions,
         end_time=float(end_time),
     )
-
-
-def _build_boundary_all_impossible(
-    *, setup: SetupConfig, seed: int
-) -> RouteOptimizationInput:
-    return _build_problem(
-        n_attractions=8,
-        profile="impossible",
-        seed=seed,
-        setup=setup,
-    )
-
-
-def _build_boundary_single_unreachable(
-    *, setup: SetupConfig, seed: int
-) -> RouteOptimizationInput:
-    problem = _build_problem(
-        n_attractions=6,
-        profile="relaxed",
-        seed=seed,
-        setup=setup,
-    )
-    unreachable = _attraction(
-        lat=problem.attractions[1].position.lat,
-        lon=problem.attractions[1].position.lon,
-        open_at=float(setup.start_time + 30),
-        close_at=float(setup.start_time + 35),
-        min_stay=10.0,
-        max_stay=15.0,
-    )
-    attractions = [problem.attractions[0], unreachable, *problem.attractions[2:]]
-    return RouteOptimizationInput(
-        start_time=problem.start_time,
-        attractions=attractions,
-        end_time=problem.end_time,
-    )
-
-
-def _build_boundary_empty_only_start(
-    *, setup: SetupConfig, seed: int
-) -> RouteOptimizationInput:
-    return _build_problem(
-        n_attractions=1,
-        profile="relaxed",
-        seed=seed,
-        setup=setup,
-    )
-
-
-def _build_boundary_timeout_bf(
-    *, setup: SetupConfig, seed: int
-) -> RouteOptimizationInput:
-    return _build_problem(
-        n_attractions=10,
-        profile="relaxed",
-        seed=seed,
-        setup=setup,
-    )
-
-
-_HANDPICKED_BOUNDARY_BUILDERS: dict[
-    str,
-    tuple[str, int, Callable[[SetupConfig, int], RouteOptimizationInput]],
-] = {
-    "boundary_all_impossible": ("impossible", 8, _build_boundary_all_impossible),
-    "boundary_single_unreachable": ("relaxed", 6, _build_boundary_single_unreachable),
-    "boundary_empty_only_start": ("relaxed", 1, _build_boundary_empty_only_start),
-    "boundary_timeout_bf": ("relaxed", 10, _build_boundary_timeout_bf),
-}
 
 
 def _resolve_handpicked_path(handpicked_file: str) -> Path:
@@ -426,7 +335,6 @@ def _load_handpicked_rows(handpicked_file: str) -> list[dict[str, Any]]:
             raise ValueError(
                 f"handpicked case must be a mapping: {resolved_path} (case={case_label})"
             )
-        case_label = f"index={index}"
         raw_id = case.get("id")
         if isinstance(raw_id, str) and raw_id.strip():
             case_label = raw_id.strip()
@@ -438,7 +346,6 @@ def _load_handpicked_rows(handpicked_file: str) -> list[dict[str, Any]]:
             raise ValueError(
                 f"{msg}: {resolved_path} (case={case_label})"
             ) from None
-
         normalized_case_id = parsed.id
         if normalized_case_id in seen_ids:
             first_index = seen_ids[normalized_case_id]
@@ -454,38 +361,37 @@ def _load_handpicked_rows(handpicked_file: str) -> list[dict[str, Any]]:
     return out
 
 
-def _handpicked_cases(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenario]:
-    rows = _load_handpicked_rows(suite.handpicked_file)
+def _handpicked_cases(
+    *,
+    setup: SetupConfig,
+    suite: SuiteConfig,
+    fixture_cfg: FixtureMatrixConfig,
+) -> list[Scenario]:
     out: list[Scenario] = []
-    for row in rows:
+    for row in _load_handpicked_rows(suite.handpicked_file):
         case_id = str(row["id"])
         seed = int(row["seed"])
-        case_mode = str(row.get("case_mode", "generated"))
-        boundary_override = _HANDPICKED_BOUNDARY_BUILDERS.get(case_id)
-        if case_mode == "explicit":
-            profile = str(row.get("profile", "relaxed"))
+        profile = str(row.get("profile", "relaxed"))
+        if str(row.get("case_mode", "generated")) == "explicit":
             attractions_data = list(row["attractions"])
             start_time = int(row.get("start_time", setup.start_time))
             end_time = int(row.get("end_time", setup.end_time))
             n_attractions = len(attractions_data) + 1
-            problem = _build_explicit_problem(
+            problem = _explicit_problem(
                 setup=setup,
                 seed=seed,
                 start_time=start_time,
                 end_time=end_time,
                 attractions_data=attractions_data,
             )
-        elif boundary_override is not None:
-            profile, n_attractions, builder = boundary_override
-            problem = builder(setup=setup, seed=seed)
         else:
-            profile = str(row.get("profile", "relaxed"))
             n_attractions = int(row["n_attractions"])
-            problem = _build_problem(
-                n_attractions=n_attractions,
+            problem = _generated_problem(
+                n=n_attractions,
                 profile=profile,
                 seed=seed,
                 setup=setup,
+                fixture_cfg=fixture_cfg,
             )
         out.append(
             Scenario(
@@ -501,7 +407,13 @@ def _handpicked_cases(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenari
     return out
 
 
-def build_scenarios(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenario]:
+def build_scenarios(
+    *,
+    setup: SetupConfig,
+    suite: SuiteConfig,
+    fixture_cfg: FixtureMatrixConfig | None = None,
+) -> list[Scenario]:
+    cfg = fixture_cfg if fixture_cfg is not None else FixtureMatrixConfig()
     out: list[Scenario] = []
     for n in suite.n_attractions:
         for profile in suite.profiles:
@@ -516,16 +428,17 @@ def build_scenarios(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenario]
                         profile=profile,
                         suite=suite.name,
                         setup_name=setup.name,
-                        problem=_build_generated_problem(
-                            n_attractions=n,
+                        problem=_generated_problem(
+                            n=n,
                             profile=profile,
                             seed=seed,
                             setup=setup,
+                            fixture_cfg=cfg,
                         ),
                     )
                 )
     if suite.include_handpicked:
-        out.extend(_handpicked_cases(setup=setup, suite=suite))
+        out.extend(_handpicked_cases(setup=setup, suite=suite, fixture_cfg=cfg))
     return out
 
 
@@ -534,14 +447,8 @@ def setup_from_dict(data: dict[str, Any], *, name: str) -> SetupConfig:
         name=name,
         start_time=int(data.get("start_time", 8 * 60)),
         end_time=int(data.get("end_time", 22 * 60)),
-        open_start_min=int(data.get("open_start_min", 8 * 60)),
-        open_start_max=int(data.get("open_start_max", 11 * 60)),
-        window_len_min=int(data.get("window_len_min", 180)),
-        window_len_max=int(data.get("window_len_max", 600)),
-        min_stay_min=int(data.get("min_stay_min", 10)),
-        min_stay_max=int(data.get("min_stay_max", 30)),
-        extra_max_min=int(data.get("extra_max_min", 10)),
-        extra_max_max=int(data.get("extra_max_max", 60)),
+        min_stay=int(data.get("min_stay", 15)),
+        extra_max=int(data.get("extra_max", 30)),
         base_lat=float(data.get("base_lat", 60.1700)),
         base_lon=float(data.get("base_lon", 24.9410)),
         location_spread=float(data.get("location_spread", 0.01)),

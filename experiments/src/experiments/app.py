@@ -18,18 +18,16 @@ from .scenarios import build_scenarios, setup_from_dict, suite_from_dict
 from .types import ALL_VARIANTS
 
 
-def _fixture_provider(cfg: DictConfig) -> FixtureMatrixProvider:
+def _fixture_config(cfg: DictConfig) -> FixtureMatrixConfig:
     matrix_cfg = cfg.get("matrix", {})
-    return FixtureMatrixProvider(
-        FixtureMatrixConfig(
-            density=float(matrix_cfg.get("density", 1.0)),
-            disconnected_prob=float(matrix_cfg.get("disconnected_prob", 0.0)),
-            time_min=float(matrix_cfg.get("time_min", 5.0)),
-            time_max=float(matrix_cfg.get("time_max", 45.0)),
-            pt_faster_prob=float(matrix_cfg.get("pt_faster_prob", 0.35)),
-            pt_speedup_min=float(matrix_cfg.get("pt_speedup_min", 1.05)),
-            pt_speedup_max=float(matrix_cfg.get("pt_speedup_max", 1.80)),
-        )
+    return FixtureMatrixConfig(
+        density=float(matrix_cfg.get("density", 1.0)),
+        disconnected_prob=float(matrix_cfg.get("disconnected_prob", 0.0)),
+        time_min=float(matrix_cfg.get("time_min", 5.0)),
+        time_max=float(matrix_cfg.get("time_max", 45.0)),
+        pt_faster_prob=float(matrix_cfg.get("pt_faster_prob", 0.35)),
+        pt_speedup_min=float(matrix_cfg.get("pt_speedup_min", 1.05)),
+        pt_speedup_max=float(matrix_cfg.get("pt_speedup_max", 1.80)),
     )
 
 
@@ -48,7 +46,10 @@ async def _run(cfg: DictConfig) -> int:
         OmegaConf.to_container(cfg.suite, resolve=True),  # type: ignore[arg-type]
         name=suite_name,
     )
-    scenarios = build_scenarios(setup=setup_cfg, suite=suite_cfg)
+    fixture_cfg = _fixture_config(cfg)
+    scenarios = build_scenarios(
+        setup=setup_cfg, suite=suite_cfg, fixture_cfg=fixture_cfg
+    )
     variants = [ALL_VARIANTS[name] for name in suite_cfg.variants]
     timeout_seconds = float(cfg.get("timeout_seconds", 60.0))
     astar_timeout_seconds = float(cfg.get("astar_timeout_seconds", 60.0))
@@ -66,7 +67,7 @@ async def _run(cfg: DictConfig) -> int:
             graphhopper_base_url=cfg.get("infra", {}).get("graphhopper_base_url"),
         )
     else:
-        matrix_provider = _fixture_provider(cfg)
+        matrix_provider = FixtureMatrixProvider(fixture_cfg)
 
     rows = await run_suite(
         scenarios=scenarios,

@@ -1,15 +1,8 @@
 name: real_reference
 start_time: 480
 end_time: 1320
-open_start_min: 480
-open_start_max: 660
-window_len_min: 240
-window_len_max: 540
-min_stay_min: 10
-min_stay_max: 30
-extra_max_min: 10
-extra_max_max: 60
+min_stay: 15
+extra_max: 45
 base_lat: 60.1700
 base_lon: 24.9410
 location_spread: 0.01
-
