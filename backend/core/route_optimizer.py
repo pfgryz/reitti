@@ -550,7 +550,7 @@ async def optimize_route_instrumented(
         if node.visited == goal:
             elapsed = (time.perf_counter() - started) * 1000.0
             return (
-                RouteOptimizationResult(node.visits, trip_end(problem, node)),
+                RouteOptimizationResult(node.visits, node.t),
                 RunStats(
                     expanded_nodes=expanded_nodes,
                     generated_nodes=generated_nodes,

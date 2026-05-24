@@ -78,7 +78,7 @@ def _fake_matrices() -> TravelMatrices:
 def test_optimize_trip_success(monkeypatch: pytest.MonkeyPatch) -> None:
     result = RouteOptimizationResult(
         (VisitDecision(1, 600.0, 690.0),),
-        end_time=1080.0,
+        end_time=690.0,
     )
 
     monkeypatch.setattr(
@@ -94,7 +94,7 @@ def test_optimize_trip_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["end_time"] == 1080.0
+    assert data["end_time"] == 690.0
     assert data["travel_time"] == 15.0
     assert data["walk_distance"] == 250.0
     assert data["distance"] == 15000.0
@@ -131,7 +131,7 @@ def test_optimize_trip_infeasible(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_optimize_trip_include_legs(monkeypatch: pytest.MonkeyPatch) -> None:
     result = RouteOptimizationResult(
         (VisitDecision(1, 600.0, 690.0),),
-        end_time=1080.0,
+        end_time=690.0,
     )
 
     monkeypatch.setattr(

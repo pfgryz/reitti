@@ -56,7 +56,7 @@ async def test_from_result_maps_visits_and_totals() -> None:
             VisitDecision(1, 610.0, 655.0),
             VisitDecision(2, 670.0, 730.0),
         ),
-        end_time=1080.0,
+        end_time=730.0,
     )
     matrices = TravelMatrices(
         _FakeLegs(
@@ -68,7 +68,7 @@ async def test_from_result_maps_visits_and_totals() -> None:
     )
     response = await from_result(result, matrices, include_legs=False)
 
-    assert response.end_time == 1080.0
+    assert response.end_time == 730.0
     assert response.travel_time == 20.0
     assert response.walk_distance == 150.0
     assert response.distance == 150.0
@@ -83,7 +83,7 @@ async def test_from_result_maps_visits_and_totals() -> None:
 async def test_from_result_builds_legs() -> None:
     result = RouteOptimizationResult(
         (VisitDecision(1, 600.0, 690.0),),
-        end_time=1080.0,
+        end_time=690.0,
     )
     matrices = TravelMatrices(
         _FakeLegs(

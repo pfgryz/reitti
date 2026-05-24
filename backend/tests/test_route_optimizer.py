@@ -217,7 +217,20 @@ async def test_optimize_route() -> None:
     assert v.attraction_index == 1
     assert v.arrival_time == pytest.approx(10.0)
     assert v.stay == pytest.approx(60.0)
-    assert result.end_time == pytest.approx(1440.0)
+    assert result.end_time == pytest.approx(70.0)
+
+
+@pytest.mark.asyncio
+async def test_optimize_route_end_time_is_actual_finish() -> None:
+    problem = RouteOptimizationInput(
+        540.0,
+        [spot(open_at=540, close=1080), spot(open_at=540, close=1080, kind=AttractionType.PARK)],
+        end_time=1080.0,
+    )
+    result = await optimize_route(problem, fake_matrices(2))
+    last = result.visits[-1]
+    assert result.end_time == pytest.approx(last.departure_time)
+    assert result.end_time < 1080.0
 
 
 @pytest.mark.asyncio
