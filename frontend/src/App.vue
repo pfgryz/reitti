@@ -40,6 +40,18 @@
             <input type="time" v-model="store.endTime" class="modern-input" />
           </div>
         </div>
+
+        <div class="input-group mt-2">
+          <label><Calendar class="icon-xs text-muted" /> Dzień wycieczki:</label>
+          <select
+            class="modern-input"
+            :value="store.visitDay"
+            @change="store.setVisitDay(Number($event.target.value))"
+          >
+            <option v-for="d in weekdays" :key="d.day" :value="d.day">{{ d.label }}</option>
+          </select>
+          <span class="text-sm text-muted">Wybrany dzień: {{ selectedDayLabel }}</span>
+        </div>
       </section>
 
       <section class="card">
@@ -70,7 +82,7 @@
               v-for="h in previewPlace.hours"
               :key="h.day"
               class="hours-item"
-              :class="{ 'is-today': h.day === currentDay }"
+              :class="{ 'is-selected': h.day === store.visitDay }"
             >
               <span class="day-name">{{ h.label }}</span>
               <span class="day-time">{{ h.time }}</span>
@@ -157,7 +169,7 @@
               <template v-if="place.hours">
                 <p class="popup-subtitle">Godziny otwarcia</p>
                 <ul class="popup-hours">
-                  <li v-for="h in place.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                  <li v-for="h in place.hours" :key="h.day" :class="{ 'is-selected': h.day === store.visitDay }">
                     <span>{{ h.label }}</span><span>{{ h.time }}</span>
                   </li>
                 </ul>
@@ -179,7 +191,7 @@
               <template v-if="store.startPoint.hours">
                 <p class="popup-subtitle">Godziny otwarcia</p>
                 <ul class="popup-hours">
-                  <li v-for="h in store.startPoint.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                  <li v-for="h in store.startPoint.hours" :key="h.day" :class="{ 'is-selected': h.day === store.visitDay }">
                     <span>{{ h.label }}</span><span>{{ h.time }}</span>
                   </li>
                 </ul>
@@ -201,7 +213,7 @@
               <template v-if="item.hours">
                 <p class="popup-subtitle">Godziny otwarcia</p>
                 <ul class="popup-hours">
-                  <li v-for="h in item.hours" :key="h.day" :class="{ 'is-today': h.day === currentDay }">
+                  <li v-for="h in item.hours" :key="h.day" :class="{ 'is-selected': h.day === store.visitDay }">
                     <span>{{ h.label }}</span><span>{{ h.time }}</span>
                   </li>
                 </ul>
@@ -233,14 +245,26 @@ import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup, LIcon } from '@vue-leaflet/vue-leaflet'
 
 import {
-  Map as MapIcon, MapPin, Clock, Flag,
+  Map as MapIcon, MapPin, Clock, Flag, Calendar,
   Plus, Trash2, Navigation, Settings,
   List, CheckCircle2, MapPinPlus
 } from 'lucide-vue-next'
 
-const currentDay = new Date().getDay()
+const weekdays = [
+  { day: 1, label: 'Poniedziałek' },
+  { day: 2, label: 'Wtorek' },
+  { day: 3, label: 'Środa' },
+  { day: 4, label: 'Czwartek' },
+  { day: 5, label: 'Piątek' },
+  { day: 6, label: 'Sobota' },
+  { day: 0, label: 'Niedziela' }
+]
 
 const store = useRouteStore()
+
+const selectedDayLabel = computed(() =>
+  weekdays.find(d => d.day === store.visitDay)?.label ?? ''
+)
 const map = ref(null)
 
 watch(
@@ -522,7 +546,7 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
   transition: background-color 0.2s;
 }
 
-.hours-item.is-today {
+.hours-item.is-selected {
   background: var(--primary);
   color: white;
   font-weight: 600;
@@ -563,7 +587,7 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
   padding: 2px 4px;
   border-radius: 3px;
 }
-.popup-hours li.is-today {
+.popup-hours li.is-selected {
   background-color: var(--primary);
   color: white;
   font-weight: 600;

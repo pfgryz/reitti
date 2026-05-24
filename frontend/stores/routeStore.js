@@ -11,11 +11,11 @@ import {
 const START_OPENING_HOURS = { open: 0, close: 1440 }
 const START_STAY = { min: 0, max: 0 }
 
-function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0 } = {}) {
+function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0, visitDay } = {}) {
   const opening_hours = isStart
     ? START_OPENING_HOURS
     : (() => {
-        const oh = parseOpeningHoursForDay(place.hours)
+        const oh = parseOpeningHoursForDay(place.hours, visitDay)
         if (!oh || oh.closed) return null
         return { open: oh.open, close: oh.close }
       })()
@@ -31,14 +31,14 @@ function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0 } = 
   }
 }
 
-function findClosedToday(places) {
-  return places.filter(p => parseOpeningHoursForDay(p.hours)?.closed)
+function findClosedOnDay(places, visitDay) {
+  return places.filter(p => parseOpeningHoursForDay(p.hours, visitDay)?.closed)
 }
 
-function buildOptimizeBody(startTime, endTime, startPoint, attractions) {
-  const start = attractionToApi(startPoint, { isStart: true })
+function buildOptimizeBody(startTime, endTime, startPoint, attractions, visitDay) {
+  const start = attractionToApi(startPoint, { isStart: true, visitDay })
   const stops = attractions.map(a =>
-    attractionToApi(a, { stayMin: a.stayMin, stayMax: a.stayMax })
+    attractionToApi(a, { stayMin: a.stayMin, stayMax: a.stayMax, visitDay })
   )
   if (!start || stops.some(s => !s)) return null
 
@@ -141,6 +141,7 @@ export const useRouteStore = defineStore('route', () => {
   })
   const startTime = ref('09:00')
   const endTime = ref('18:00')
+  const visitDay = ref(new Date().getDay())
   const attractions = ref([])
 
   const isRouteCalculated = ref(false)
@@ -159,6 +160,12 @@ export const useRouteStore = defineStore('route', () => {
     error.value = null
   }
 
+  const setVisitDay = (day) => {
+    if (visitDay.value === day) return
+    visitDay.value = day
+    clearRouteResult()
+  }
+
   const addAttraction = (attraction) => {
     attractions.value.push({ ...attraction, id: Date.now() })
     clearRouteResult()
@@ -173,9 +180,9 @@ export const useRouteStore = defineStore('route', () => {
     isLoading.value = true
     error.value = null
 
-    const closed = findClosedToday(attractions.value)
+    const closed = findClosedOnDay(attractions.value, visitDay.value)
     if (closed.length) {
-      error.value = `Dziś zamknięte: ${closed.map(p => p.name).join(', ')}`
+      error.value = `Zamknięte w wybrany dzień: ${closed.map(p => p.name).join(', ')}`
       isLoading.value = false
       return
     }
@@ -184,7 +191,8 @@ export const useRouteStore = defineStore('route', () => {
       startTime.value,
       endTime.value,
       startPoint.value,
-      attractions.value
+      attractions.value,
+      visitDay.value
     )
     if (!body) {
       error.value = 'Nie udało się odczytać godzin otwarcia wybranych miejsc.'
@@ -230,8 +238,8 @@ export const useRouteStore = defineStore('route', () => {
   }
 
   return {
-    helsinkiPlaces, startPoint, startTime, endTime, attractions,
+    helsinkiPlaces, startPoint, startTime, endTime, visitDay, attractions,
     isRouteCalculated, isLoading, error, totalDuration, visitOrder, mapCenter, routePolyline,
-    addAttraction, removeAttraction, clearRouteResult, calculateRoute
+    addAttraction, removeAttraction, clearRouteResult, setVisitDay, calculateRoute
   }
 })
