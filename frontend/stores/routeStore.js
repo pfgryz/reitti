@@ -119,17 +119,38 @@ function coordsForIndex(index, startPoint, attractions) {
   return a ? { lat: a.lat, lng: a.lng } : null
 }
 
-function mapVisitsToOrder(visits, startPoint, attractions) {
+function totalWaitMinutes(visits, legs, startTimeMinutes) {
+  let total = 0
+  let prevDep = startTimeMinutes
+  for (let i = 0; i < visits.length; i++) {
+    const travel = legs?.[i]?.travel_time ?? 0
+    total += Math.max(0, visits[i].arrival_time - prevDep - travel)
+    prevDep = visits[i].departure_time
+  }
+  return Math.round(total)
+}
+
+function mapVisitsToOrder(visits, legs, startTimeMinutes, startPoint, attractions) {
+  let prevDep = startTimeMinutes
   return (visits ?? []).map((v, i) => {
+    const travel = Math.round(legs?.[i]?.travel_time ?? 0)
+    const rawArrivalMinutes = prevDep + travel
+    const wait = Math.max(0, Math.round(v.arrival_time - rawArrivalMinutes))
+    const stay = Math.round(v.stay_minutes ?? v.departure_time - v.arrival_time)
+    prevDep = v.departure_time
+
     const coords = coordsForIndex(v.attraction_index, startPoint, attractions)
     return {
       order: i + 1,
       name: nameForAttractionIndex(v.attraction_index, startPoint, attractions),
       lat: coords?.lat,
       lng: coords?.lng,
+      travel,
+      wait,
+      rawArrival: minutesToTimeString(rawArrivalMinutes),
       arrival: minutesToTimeString(v.arrival_time),
       departure: minutesToTimeString(v.departure_time),
-      stay: Math.round(v.stay_minutes ?? v.departure_time - v.arrival_time)
+      stay
     }
   })
 }
@@ -195,6 +216,8 @@ export const useRouteStore = defineStore('route', () => {
   const isLoading = ref(false)
   const error = ref(null)
   const totalDuration = ref('')
+  const totalTravelTime = ref('')
+  const totalWaitTime = ref('')
   const totalWalkDistance = ref('')
   const visitOrder = ref([])
   const mapCenter = ref([60.1699, 24.9384])
@@ -207,6 +230,8 @@ export const useRouteStore = defineStore('route', () => {
     routeSegments.value = []
     visitOrder.value = []
     totalDuration.value = ''
+    totalTravelTime.value = ''
+    totalWaitTime.value = ''
     totalWalkDistance.value = ''
     error.value = null
   }
@@ -273,11 +298,17 @@ export const useRouteStore = defineStore('route', () => {
       isRouteCalculated.value = true
       visitOrder.value = mapVisitsToOrder(
         data.visits,
+        data.legs,
+        timeStringToMinutes(startTime.value),
         startPoint.value,
         attractions.value
       )
       totalDuration.value = formatDurationMinutes(
         data.end_time - timeStringToMinutes(startTime.value)
+      )
+      totalTravelTime.value = formatDurationMinutes(data.travel_time ?? 0)
+      totalWaitTime.value = formatDurationMinutes(
+        totalWaitMinutes(data.visits ?? [], data.legs, timeStringToMinutes(startTime.value))
       )
       totalWalkDistance.value = formatDistanceMeters(data.walk_distance ?? 0)
 
@@ -292,7 +323,7 @@ export const useRouteStore = defineStore('route', () => {
 
   return {
     helsinkiPlaces, startPoint, startTime, endTime, visitDay, attractions,
-    isRouteCalculated, isLoading, error, totalDuration, totalWalkDistance, visitOrder, mapCenter, routePolyline, routeSegments,
+    isRouteCalculated, isLoading, error, totalDuration, totalTravelTime, totalWaitTime, totalWalkDistance, visitOrder, mapCenter, routePolyline, routeSegments,
     addAttraction, removeAttraction, clearRouteResult, setVisitDay, calculateRoute
   }
 })

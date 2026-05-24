@@ -140,13 +140,21 @@
       <section class="card results" v-if="store.isRouteCalculated">
         <h3 class="section-title text-success"><CheckCircle2 class="icon-sm text-success" /> Sukces</h3>
         <p class="text-sm"><strong>Czas wycieczki:</strong> {{ store.totalDuration }}</p>
+        <p class="text-sm"><strong>Czas jazdy:</strong> {{ store.totalTravelTime }}</p>
+        <p class="text-sm"><strong>Czas oczekiwania na otwarcie:</strong> {{ store.totalWaitTime }}</p>
         <p class="text-sm"><strong>Dystans pieszo:</strong> {{ store.totalWalkDistance }}</p>
         <h4 class="results-subtitle">Kolejność odwiedzin</h4>
         <ol class="visit-order-list">
           <li v-for="visit in store.visitOrder" :key="visit.order" class="visit-order-item">
             <strong>{{ visit.order }}. {{ visit.name }}</strong>
             <span class="text-sm text-muted">
-              {{ visit.arrival }} – {{ visit.departure }}, pobyt {{ visit.stay }} min
+              Jazda {{ visit.travel }} min, przyjazd o {{ visit.rawArrival }}
+            </span>
+            <span v-if="visit.wait" class="text-sm text-muted">
+              Oczekiwanie na otwarcie {{ visit.wait }} min (czas wolny)
+            </span>
+            <span class="text-sm text-muted">
+              Pobyt {{ visit.arrival }} – {{ visit.departure }} ({{ visit.stay }} min)
             </span>
           </li>
         </ol>
