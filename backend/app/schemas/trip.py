@@ -1,6 +1,14 @@
 from typing import Literal
 
-from core.route_optimizer import AttractionType, StaySelectionMode
+from core import Point
+from core.route_optimizer import (
+    Attraction,
+    AttractionType,
+    OpeningHours,
+    RouteOptimizationInput,
+    StayBounds,
+    StaySelectionMode,
+)
 from pydantic import BaseModel
 
 
@@ -28,6 +36,20 @@ class TripOptimizeRequest(BaseModel):
     attractions: list[AttractionInput]
     stay_mode: StaySelectionMode = StaySelectionMode.INTERVALS_15_MIN
     include_legs: bool = False
+
+    def to_problem(self) -> RouteOptimizationInput:
+        attrs = [
+            Attraction(
+                Point(lat=a.lat, lon=a.lon),
+                OpeningHours(a.opening_hours.open, a.opening_hours.close),
+                StayBounds(a.stay.min, a.stay.max),
+                a.type,
+            )
+            for a in self.attractions
+        ]
+        return RouteOptimizationInput(
+            self.start_time, attrs, self.end_time, self.stay_mode
+        )
 
 
 class VisitOutput(BaseModel):
