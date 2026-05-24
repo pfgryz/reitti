@@ -484,15 +484,35 @@ Wygenerowano automatycznie z plików `experiments/outputs/results.csv` oraz `exp
 
 #### Podsumowanie czasu i jakości
 
-| mode | experiment | avg_ok_rate | avg_wall_time_ms | avg_expanded_nodes | avg_peak_memory_mb | median_objective_cost | avg_stay_utilization |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| fixture | astar_greedy | 0.818 | 67.104 | 646.458 | 0.252 | 14913.794 | 1.0 |
-| fixture | astar_intervals | 0.857 | 62.359 | 546.83 | 0.32 | 14913.794 | 1.0 |
-| fixture | astar_intervals_no_heuristic | 0.692 | 1565.114 | 11709.844 | 74.998 | 14250.845 | 1.0 |
-| fixture | bruteforce_greedy | 0.786 | 418.142 | 23144.75 | 4.101 | 13877.614 | 1.0 |
-| fixture | bruteforce_intervals | 0.72 | 2561.584 | 141217.864 | 23.853 | 15270.08 | 1.0 |
-| real | astar_greedy | 1.0 | 2755.717 | 533.0 | 3.612 | 2875.748 | 1.0 |
-| real | astar_intervals | 1.0 | 2819.131 | 533.0 | 8.479 | 2875.748 | 1.0 |
+| mode · experiment | avg_ok_rate | avg_wall_time_ms |
+| --- | --- | --- |
+| fixture · astar_greedy | 0.818 | 67.104 |
+| fixture · astar_intervals | 0.857 | 62.359 |
+| fixture · astar_intervals_no_heuristic | 0.692 | 1565.114 |
+| fixture · bruteforce_greedy | 0.786 | 418.142 |
+| fixture · bruteforce_intervals | 0.72 | 2561.584 |
+| real · astar_greedy | 1.0 | 2755.717 |
+| real · astar_intervals | 1.0 | 2819.131 |
+
+| mode · experiment | avg_expanded_nodes | avg_peak_memory_mb |
+| --- | --- | --- |
+| fixture · astar_greedy | 646.458 | 0.252 |
+| fixture · astar_intervals | 546.83 | 0.32 |
+| fixture · astar_intervals_no_heuristic | 11709.844 | 74.998 |
+| fixture · bruteforce_greedy | 23144.75 | 4.101 |
+| fixture · bruteforce_intervals | 141217.864 | 23.853 |
+| real · astar_greedy | 533.0 | 3.612 |
+| real · astar_intervals | 533.0 | 8.479 |
+
+| mode · experiment | median_objective_cost | avg_stay_utilization |
+| --- | --- | --- |
+| fixture · astar_greedy | 14913.794 | 1.0 |
+| fixture · astar_intervals | 14913.794 | 1.0 |
+| fixture · astar_intervals_no_heuristic | 14250.845 | 1.0 |
+| fixture · bruteforce_greedy | 13877.614 | 1.0 |
+| fixture · bruteforce_intervals | 15270.08 | 1.0 |
+| real · astar_greedy | 2875.748 | 1.0 |
+| real · astar_intervals | 2875.748 | 1.0 |
 
 #### Luka optymalności względem brute-force (na algorytm / profil)
 
