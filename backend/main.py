@@ -10,6 +10,7 @@ from app.frontend import mount_frontend
 from app.routers import distance, stops, trip
 from core.exceptions import ConfigurationError, RouteNotFoundError
 from core.route_cache import RouteCache
+from core.route_optimizer import RouteOptimizationError
 from core.routing import RouteSummary, RoutingError
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -82,6 +83,24 @@ async def route_not_found_handler(_request: Request, exc: RouteNotFoundError):
     return JSONResponse(
         status_code=404,
         content={"detail": {"code": exc.code.value, "message": exc.message}},
+    )
+
+
+@app.exception_handler(RouteOptimizationError)
+async def route_optimization_error_handler(
+    _request: Request, exc: RouteOptimizationError
+):
+    msg = str(exc)
+    lower = msg.lower()
+    if "no route found" in lower:
+        code, status = "NO_ROUTE_FOUND", 404
+    elif "individually infeasible" in lower:
+        code, status = "ATTRACTION_INFEASIBLE", 422
+    else:
+        code, status = "ROUTE_OPTIMIZATION_FAILED", 422
+    return JSONResponse(
+        status_code=status,
+        content={"detail": {"code": code, "message": msg}},
     )
 
 
