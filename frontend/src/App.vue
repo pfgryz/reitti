@@ -111,9 +111,19 @@
 
       <div class="spacer"></div>
 
-      <button class="btn btn-primary btn-large" @click="store.calculateRoute" :disabled="!store.attractions.length">
-        <Navigation class="icon-sm" /> Wyznacz optymalną trasę
+      <button
+        class="btn btn-primary btn-large"
+        @click="store.calculateRoute"
+        :disabled="!store.attractions.length || store.isLoading"
+      >
+        <Navigation class="icon-sm" />
+        {{ store.isLoading ? 'Obliczanie…' : 'Wyznacz optymalną trasę' }}
       </button>
+
+      <section class="card error-panel" v-if="store.error">
+        <h3 class="section-title text-danger">Błąd</h3>
+        <p class="text-sm">{{ store.error }}</p>
+      </section>
 
       <section class="card results" v-if="store.isRouteCalculated">
         <h3 class="section-title text-success"><CheckCircle2 class="icon-sm text-success" /> Sukces</h3>
@@ -244,8 +254,7 @@ const filteredStartPlaces = computed(() => {
 const selectStartPlace = (place) => {
   startSearch.value = place.name
   store.startPoint = { name: place.name, lat: place.lat, lng: place.lng, hours: place.hours }
-  store.isRouteCalculated = false
-  store.routePolyline = []
+  store.clearRouteResult()
 }
 
 const newAttraction = reactive({
@@ -412,7 +421,9 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
 .text-muted { color: var(--text-muted); }
 
 .results { background-color: var(--success-bg); border-color: #bbf7d0; }
+.error-panel { background-color: #fee2e2; border-color: #fecaca; }
 .text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
 
 .autocomplete-container { position: relative; width: 100%; }
 .suggestions-list {

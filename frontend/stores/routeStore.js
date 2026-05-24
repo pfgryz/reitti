@@ -1,5 +1,66 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import {
+  hoursToMinutes,
+  minutesToTimeString,
+  parseOpeningHoursForDay,
+  timeStringToMinutes
+} from '../src/utils/time.js'
+
+const START_OPENING_HOURS = { open: 0, close: 1440 }
+const START_STAY = { min: 0, max: 0 }
+
+function attractionToApi(place, { isStart = false, stayMin = 0, stayMax = 0 } = {}) {
+  const opening_hours = isStart
+    ? START_OPENING_HOURS
+    : (() => {
+        const oh = parseOpeningHoursForDay(place.hours)
+        if (!oh || oh.closed) return null
+        return { open: oh.open, close: oh.close }
+      })()
+
+  if (!opening_hours) return null
+
+  return {
+    lat: place.lat,
+    lon: place.lng,
+    opening_hours,
+    stay: isStart ? START_STAY : { min: hoursToMinutes(stayMin), max: hoursToMinutes(stayMax) },
+    type: /muzeum|museum/i.test(place.name) ? 'museum' : 'other'
+  }
+}
+
+function findClosedToday(places) {
+  return places.filter(p => parseOpeningHoursForDay(p.hours)?.closed)
+}
+
+function buildOptimizeBody(startTime, endTime, startPoint, attractions) {
+  const start = attractionToApi(startPoint, { isStart: true })
+  const stops = attractions.map(a =>
+    attractionToApi(a, { stayMin: a.stayMin, stayMax: a.stayMax })
+  )
+  if (!start || stops.some(s => !s)) return null
+
+  return {
+    start_time: timeStringToMinutes(startTime),
+    end_time: timeStringToMinutes(endTime),
+    include_legs: true,
+    attractions: [start, ...stops]
+  }
+}
+
+function polylineFromLegs(legs) {
+  const points = []
+  for (const leg of legs) {
+    for (const [lat, lon] of leg.points) {
+      const last = points[points.length - 1]
+      if (!last || last[0] !== lat || last[1] !== lon) {
+        points.push([lat, lon])
+      }
+    }
+  }
+  return points
+}
 
 export const useRouteStore = defineStore('route', () => {
   const defaultHours = () => [
@@ -50,44 +111,102 @@ export const useRouteStore = defineStore('route', () => {
     name: 'Dworzec Główny, Helsinki',
     lat: 60.1718,
     lng: 24.9414,
-    hours: open24h() // <-- Dodaliśmy wywołanie funkcji z godzinami
+    hours: open24h()
   })
   const startTime = ref('09:00')
   const endTime = ref('18:00')
   const attractions = ref([])
 
   const isRouteCalculated = ref(false)
+  const isLoading = ref(false)
+  const error = ref(null)
   const totalDuration = ref('')
   const mapCenter = ref([60.1699, 24.9384])
   const routePolyline = ref([])
 
-  const addAttraction = (attraction) => {
-    attractions.value.push({ ...attraction, id: Date.now() })
+  const clearRouteResult = () => {
     isRouteCalculated.value = false
     routePolyline.value = []
+    error.value = null
+  }
+
+  const addAttraction = (attraction) => {
+    attractions.value.push({ ...attraction, id: Date.now() })
+    clearRouteResult()
   }
 
   const removeAttraction = (id) => {
     attractions.value = attractions.value.filter(a => a.id !== id)
-    isRouteCalculated.value = false
-    routePolyline.value = []
+    clearRouteResult()
   }
 
-  const calculateRoute = () => {
-    isRouteCalculated.value = true
-    totalDuration.value = 'Czas obliczony na podstawie punktów'
+  const calculateRoute = async () => {
+    isLoading.value = true
+    error.value = null
 
-    const points = [
-      [startPoint.value.lat, startPoint.value.lng],
-      ...attractions.value.map(a => [a.lat, a.lng])
-    ]
+    const closed = findClosedToday(attractions.value)
+    if (closed.length) {
+      error.value = `Dziś zamknięte: ${closed.map(p => p.name).join(', ')}`
+      isLoading.value = false
+      return
+    }
 
-    routePolyline.value = points
+    const body = buildOptimizeBody(
+      startTime.value,
+      endTime.value,
+      startPoint.value,
+      attractions.value
+    )
+    if (!body) {
+      error.value = 'Nie udało się odczytać godzin otwarcia wybranych miejsc.'
+      isLoading.value = false
+      return
+    }
+
+    try {
+      const res = await fetch('/trip/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        const detail = data.detail
+        error.value = typeof detail === 'object' && detail?.message
+          ? detail.message
+          : typeof detail === 'string'
+            ? detail
+            : `Błąd serwera (${res.status})`
+        return
+      }
+
+      isRouteCalculated.value = true
+      totalDuration.value =
+        `Koniec: ${minutesToTimeString(data.end_time)}, marsz: ${Math.round(data.travel_time)} min, ${Math.round(data.walk_distance)} m`
+
+      if (data.legs?.length) {
+        routePolyline.value = polylineFromLegs(data.legs)
+      } else {
+        routePolyline.value = [
+          [startPoint.value.lat, startPoint.value.lng],
+          ...data.visits.map(v => {
+            const a = attractions.value[v.attraction_index - 1]
+            return [a.lat, a.lng]
+          })
+        ]
+      }
+    } catch {
+      error.value = 'Nie udało się połączyć z serwerem.'
+    } finally {
+      isLoading.value = false
+    }
   }
 
   return {
     helsinkiPlaces, startPoint, startTime, endTime, attractions,
-    isRouteCalculated, totalDuration, mapCenter, routePolyline,
-    addAttraction, removeAttraction, calculateRoute
+    isRouteCalculated, isLoading, error, totalDuration, mapCenter, routePolyline,
+    addAttraction, removeAttraction, clearRouteResult, calculateRoute
   }
 })
