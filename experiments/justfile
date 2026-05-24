@@ -61,10 +61,10 @@ run-full-parallel: (clean-results) (pipeline-full-both-parallel) (merge-suite-ou
     @echo "Full parallel pipeline done (data+plots+docs)."
 
 run-grid:
-    uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture setup.seed_count=1 suite.seed_count=1
+    uv run python -m experiments.app suite=synthetic_main setup=baseline matrix.mode=fixture suite.seed_count=1
 
 run-ablation:
-    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture setup.seed_count=2 suite.seed_count=2
+    uv run python -m experiments.app suite=heuristic_ablation setup=baseline matrix.mode=fixture suite.seed_count=2
 
 run-boundary:
     uv run python -m experiments.app suite=handpicked_validation setup=infeasible_sanity matrix.mode=fixture

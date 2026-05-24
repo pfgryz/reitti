@@ -80,6 +80,92 @@ def test_build_scenarios_includes_handpicked_from_yaml(tmp_path: Path) -> None:
     assert all(s.suite == "handpicked_validation" for s in scenarios)
 
 
+def test_build_scenarios_supports_explicit_handpicked_case(tmp_path: Path) -> None:
+    handpicked = tmp_path / "explicit_cases.yaml"
+    handpicked.write_text(
+        "\n".join(
+            [
+                "cases:",
+                "  - id: explicit_case",
+                "    case_mode: explicit",
+                "    profile: tight",
+                "    seed: 123",
+                "    start_time: 500",
+                "    end_time: 1200",
+                "    attractions:",
+                "      - open: 540",
+                "        close: 660",
+                "        min_stay: 20",
+                "        max_stay: 40",
+                "      - open: 620",
+                "        close: 700",
+                "        min_stay: 15",
+                "        max_stay: 30",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    setup = setup_from_dict({}, name="baseline")
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+            "handpicked_file": str(handpicked),
+        },
+        name="handpicked_explicit",
+    )
+
+    scenarios = build_scenarios(setup=setup, suite=suite)
+    target = scenarios[0]
+    assert target.id == "explicit_case"
+    assert target.n_attractions == 3
+    assert target.problem.start_time == 500.0
+    assert target.problem.end_time == 1200.0
+    assert target.problem.attractions[1].opening_hours.open == 540.0
+    assert target.problem.attractions[2].stay.max == 30.0
+
+
+def test_build_scenarios_raises_for_explicit_case_without_attractions(
+    tmp_path: Path,
+) -> None:
+    handpicked = tmp_path / "invalid_explicit.yaml"
+    handpicked.write_text(
+        "\n".join(
+            [
+                "cases:",
+                "  - id: missing_explicit",
+                "    case_mode: explicit",
+                "    profile: relaxed",
+                "    seed: 7",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    setup = setup_from_dict({}, name="baseline")
+    suite = suite_from_dict(
+        {
+            "variants": ["astar_greedy"],
+            "matrix_mode": "fixture",
+            "n_attractions": [],
+            "seed_count": 0,
+            "profiles": [],
+            "include_handpicked": True,
+            "handpicked_file": str(handpicked),
+        },
+        name="handpicked_invalid_explicit",
+    )
+    with pytest.raises(
+        ValueError, match="explicit case attractions must be provided as a list"
+    ):
+        build_scenarios(setup=setup, suite=suite)
+
+
 def test_build_scenarios_loads_default_relative_handpicked_file() -> None:
     setup = setup_from_dict(
         {

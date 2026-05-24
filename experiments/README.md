@@ -127,10 +127,10 @@ Rule: compare fixture vs real as trend/ordering, not absolute milliseconds.
 - `infeasible_sanity`: impossible-oriented setup
 - `real_reference`: setup used for real-mode reference runs
 
-Each setup defines numeric ranges:
+Each setup defines generator/network defaults:
 - time windows (`open_start_*`, `window_len_*`)
 - stay bounds (`min_stay_*`, `extra_max_*`)
-- base experiment grid defaults (`profiles`, `n_attractions`, `seed_count`)
+- location placement (`base_lat`, `base_lon`, `location_spread`)
 
 ### `suite/*.yaml` (what to run and why)
 - `synthetic_main`
@@ -156,8 +156,14 @@ Suite fields:
   - `boundary_single_unreachable`
   - `boundary_empty_only_start`
   - `boundary_timeout_bf`
+- all boundary cases are written in `case_mode: explicit` (manual windows/stays)
 - used by `handpicked_validation`
 - checked by feasibility metric rules
+
+Handpicked cases support 2 modes:
+- `generated` (default): define `profile`, `seed`, `n_attractions`, sampled via setup ranges
+- `explicit`: define `profile`, `seed`, optional `start_time`/`end_time`, and
+  `attractions` list with `open`, `close`, `min_stay`, `max_stay` (no coordinates)
 
 ## Data Modes
 

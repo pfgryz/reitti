@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Literal
 
 from omegaconf import OmegaConf
+from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError, model_validator
 
 from . import ensure_backend_path
 
@@ -21,15 +23,56 @@ from core.route_optimizer import (  # noqa: E402
 )
 
 CONF_ROOT = Path(__file__).resolve().parents[2] / "conf"
-HANDPICKED_ALLOWED_PROFILES = {"relaxed", "tight", "impossible"}
+
+
+class ExplicitAttractionRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    open: StrictInt
+    close: StrictInt
+    min_stay: StrictInt
+    max_stay: StrictInt
+
+    @model_validator(mode="after")
+    def _validate_ranges(self) -> ExplicitAttractionRow:
+        if self.open >= self.close:
+            raise ValueError("explicit attraction open must be < close")
+        if self.min_stay > self.max_stay:
+            raise ValueError("explicit attraction min_stay must be <= max_stay")
+        return self
+
+
+class HandpickedCaseRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    profile: Literal["relaxed", "tight", "impossible"]
+    seed: StrictInt
+    case_mode: Literal["generated", "explicit"] = "generated"
+    n_attractions: StrictInt | None = None
+    attractions: list[ExplicitAttractionRow] | None = None
+    start_time: StrictInt | None = None
+    end_time: StrictInt | None = None
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self) -> HandpickedCaseRow:
+        self.id = self.id.strip()
+        if not self.id:
+            raise ValueError("handpicked case id must be a non-empty string")
+
+        if self.case_mode == "generated":
+            if self.n_attractions is None or self.n_attractions < 1:
+                raise ValueError("handpicked case n_attractions must be an int >= 1")
+            return self
+
+        if self.attractions is None:
+            raise ValueError("explicit case attractions must be provided as a list")
+        return self
 
 
 @dataclass(frozen=True, slots=True)
 class SetupConfig:
     name: str
-    profiles: tuple[str, ...]
-    n_attractions: tuple[int, ...]
-    seed_count: int
     start_time: int
     end_time: int
     open_start_min: int
@@ -40,6 +83,9 @@ class SetupConfig:
     min_stay_max: int
     extra_max_min: int
     extra_max_max: int
+    base_lat: float
+    base_lon: float
+    location_spread: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,12 +161,10 @@ def _build_problem(
     setup: SetupConfig,
 ) -> RouteOptimizationInput:
     rng = random.Random(seed)
-    base_lat = 60.1700
-    base_lon = 24.9410
     attractions = [
         _attraction(
-            lat=base_lat,
-            lon=base_lon,
+            lat=setup.base_lat,
+            lon=setup.base_lon,
             open_at=0.0,
             close_at=24 * 60,
             min_stay=0.0,
@@ -132,8 +176,10 @@ def _build_problem(
         min_stay, max_stay = _sample_stay(profile, rng, setup)
         attractions.append(
             _attraction(
-                lat=base_lat + rng.uniform(-0.01, 0.01),
-                lon=base_lon + rng.uniform(-0.01, 0.01),
+                lat=setup.base_lat
+                + rng.uniform(-setup.location_spread, setup.location_spread),
+                lon=setup.base_lon
+                + rng.uniform(-setup.location_spread, setup.location_spread),
                 open_at=open_at,
                 close_at=close_at,
                 min_stay=min_stay,
@@ -144,6 +190,45 @@ def _build_problem(
         start_time=float(setup.start_time),
         attractions=attractions,
         end_time=float(setup.end_time),
+    )
+
+
+def _build_explicit_problem(
+    *,
+    setup: SetupConfig,
+    seed: int,
+    start_time: int,
+    end_time: int,
+    attractions_data: list[dict[str, Any]],
+) -> RouteOptimizationInput:
+    rng = random.Random(seed)
+    attractions = [
+        _attraction(
+            lat=setup.base_lat,
+            lon=setup.base_lon,
+            open_at=0.0,
+            close_at=24 * 60,
+            min_stay=0.0,
+            max_stay=0.0,
+        )
+    ]
+    for row in attractions_data:
+        attractions.append(
+            _attraction(
+                lat=setup.base_lat
+                + rng.uniform(-setup.location_spread, setup.location_spread),
+                lon=setup.base_lon
+                + rng.uniform(-setup.location_spread, setup.location_spread),
+                open_at=float(row["open"]),
+                close_at=float(row["close"]),
+                min_stay=float(row["min_stay"]),
+                max_stay=float(row["max_stay"]),
+            )
+        )
+    return RouteOptimizationInput(
+        start_time=float(start_time),
+        attractions=attractions,
+        end_time=float(end_time),
     )
 
 
@@ -236,26 +321,26 @@ def _load_handpicked_rows(handpicked_file: str) -> list[dict[str, Any]]:
         raise ValueError(f"handpicked cases must be a list: {resolved_path}")
     out: list[dict[str, Any]] = []
     seen_ids: dict[str, int] = {}
-    required_keys = {"id", "profile", "n_attractions", "seed"}
     for index, case in enumerate(cases, start=1):
+        case_label = f"index={index}"
         if not isinstance(case, dict):
-            raise ValueError(f"handpicked case must be a mapping: {resolved_path}")
-        missing = sorted(required_keys - set(case.keys()))
+            raise ValueError(
+                f"handpicked case must be a mapping: {resolved_path} (case={case_label})"
+            )
         case_label = f"index={index}"
         raw_id = case.get("id")
         if isinstance(raw_id, str) and raw_id.strip():
             case_label = raw_id.strip()
-        if missing:
+        try:
+            parsed = HandpickedCaseRow.model_validate(case)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            msg = str(first.get("msg", "invalid handpicked case"))
             raise ValueError(
-                "handpicked case missing required keys "
-                f"{missing}: {resolved_path} (case={case_label})"
-            )
-        case_id = case["id"]
-        if not isinstance(case_id, str) or not case_id.strip():
-            raise ValueError(
-                f"handpicked case id must be a non-empty string: {resolved_path} (case={case_label})"
-            )
-        normalized_case_id = case_id.strip()
+                f"{msg}: {resolved_path} (case={case_label})"
+            ) from None
+
+        normalized_case_id = parsed.id
         if normalized_case_id in seen_ids:
             first_index = seen_ids[normalized_case_id]
             raise ValueError(
@@ -264,28 +349,9 @@ def _load_handpicked_rows(handpicked_file: str) -> list[dict[str, Any]]:
                 f"(first index={first_index}, duplicate index={index})"
             )
         seen_ids[normalized_case_id] = index
-        profile = case["profile"]
-        if not isinstance(profile, str) or profile not in HANDPICKED_ALLOWED_PROFILES:
-            raise ValueError(
-                "handpicked case profile must be one of "
-                f"{sorted(HANDPICKED_ALLOWED_PROFILES)}: {resolved_path} (case={case_id})"
-            )
-        n_attractions = case["n_attractions"]
-        if (
-            not isinstance(n_attractions, int)
-            or isinstance(n_attractions, bool)
-            or n_attractions < 1
-        ):
-            raise ValueError(
-                f"handpicked case n_attractions must be an int >= 1: {resolved_path} (case={case_id})"
-            )
-        seed = case["seed"]
-        if not isinstance(seed, int) or isinstance(seed, bool):
-            raise ValueError(
-                f"handpicked case seed must be an int: {resolved_path} (case={case_id})"
-            )
-        case["id"] = normalized_case_id
-        out.append(case)
+        row = parsed.model_dump(exclude_none=True)
+        row["id"] = normalized_case_id
+        out.append(row)
     return out
 
 
@@ -295,8 +361,22 @@ def _handpicked_cases(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenari
     for row in rows:
         case_id = str(row["id"])
         seed = int(row["seed"])
+        case_mode = str(row.get("case_mode", "generated"))
         boundary_override = _HANDPICKED_BOUNDARY_BUILDERS.get(case_id)
-        if boundary_override is not None:
+        if case_mode == "explicit":
+            profile = str(row.get("profile", "relaxed"))
+            attractions_data = list(row["attractions"])
+            start_time = int(row.get("start_time", setup.start_time))
+            end_time = int(row.get("end_time", setup.end_time))
+            n_attractions = len(attractions_data) + 1
+            problem = _build_explicit_problem(
+                setup=setup,
+                seed=seed,
+                start_time=start_time,
+                end_time=end_time,
+                attractions_data=attractions_data,
+            )
+        elif boundary_override is not None:
             profile, n_attractions, builder = boundary_override
             problem = builder(setup=setup, seed=seed)
         else:
@@ -353,9 +433,6 @@ def build_scenarios(*, setup: SetupConfig, suite: SuiteConfig) -> list[Scenario]
 def setup_from_dict(data: dict[str, Any], *, name: str) -> SetupConfig:
     return SetupConfig(
         name=name,
-        profiles=tuple(str(v) for v in data.get("profiles", ["relaxed"])),
-        n_attractions=tuple(int(v) for v in data.get("n_attractions", [6, 9, 12])),
-        seed_count=int(data.get("seed_count", 10)),
         start_time=int(data.get("start_time", 8 * 60)),
         end_time=int(data.get("end_time", 22 * 60)),
         open_start_min=int(data.get("open_start_min", 8 * 60)),
@@ -366,6 +443,9 @@ def setup_from_dict(data: dict[str, Any], *, name: str) -> SetupConfig:
         min_stay_max=int(data.get("min_stay_max", 30)),
         extra_max_min=int(data.get("extra_max_min", 10)),
         extra_max_max=int(data.get("extra_max_max", 60)),
+        base_lat=float(data.get("base_lat", 60.1700)),
+        base_lon=float(data.get("base_lon", 24.9410)),
+        location_spread=float(data.get("location_spread", 0.01)),
     )
 
 

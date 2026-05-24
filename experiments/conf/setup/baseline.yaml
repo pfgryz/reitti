@@ -1,7 +1,4 @@
 name: baseline
-profiles: [relaxed]
-n_attractions: [6, 9, 12, 15]
-seed_count: 20
 start_time: 480
 end_time: 1320
 open_start_min: 480
@@ -12,4 +9,7 @@ min_stay_min: 10
 min_stay_max: 30
 extra_max_min: 10
 extra_max_max: 60
+base_lat: 60.1700
+base_lon: 24.9410
+location_spread: 0.01
 

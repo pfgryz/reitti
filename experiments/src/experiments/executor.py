@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import multiprocessing as mp
+import queue
 import time
 import tracemalloc
 
@@ -13,34 +16,142 @@ from .solver import run_variant
 from .types import Row, Variant
 
 BRUTEFORCE_MAX_ATTRACTIONS = 10
+WORKER_STARTUP_GRACE_SECONDS = 2.0
 
 
-def _append_suite_timeout_skips(
+async def _run_case_with_provider(
     *,
-    rows: list[Row],
-    scenarios: list[Scenario],
-    variants: list[Variant],
+    variant: Variant,
+    scenario: Scenario,
     mode: str,
-    start_scenario_idx: int,
-    start_variant_idx: int,
-    suite_timeout_seconds: float,
-    bar,
+    timeout_seconds: float,
+    astar_timeout_seconds: float | None,
+    matrix_provider: MatrixProvider,
+) -> Row:
+    async with matrix_provider.acquire(scenario) as matrices:
+        return await run_case(
+            variant=variant,
+            scenario=scenario,
+            mode=mode,
+            timeout_seconds=timeout_seconds,
+            astar_timeout_seconds=astar_timeout_seconds,
+            matrices=matrices,
+        )
+
+
+def _case_worker_entry(
+    result_queue: mp.Queue,
+    started_event: mp.synchronize.Event,
+    *,
+    variant: Variant,
+    scenario: Scenario,
+    mode: str,
+    timeout_seconds: float,
+    astar_timeout_seconds: float | None,
+    matrix_provider: MatrixProvider,
 ) -> None:
-    msg = f"suite timed out after {suite_timeout_seconds:.1f}s"
-    for s_idx in range(start_scenario_idx, len(scenarios)):
-        scenario = scenarios[s_idx]
-        v_start = start_variant_idx if s_idx == start_scenario_idx else 0
-        for v_idx in range(v_start, len(variants)):
-            rows.append(
-                row_error(
-                    variant=variants[v_idx],
-                    scenario=scenario,
-                    mode=mode,
-                    status="skipped",
-                    error=msg,
-                )
+    try:
+        started_event.set()
+        row = asyncio.run(
+            _run_case_with_provider(
+                variant=variant,
+                scenario=scenario,
+                mode=mode,
+                timeout_seconds=timeout_seconds,
+                astar_timeout_seconds=astar_timeout_seconds,
+                matrix_provider=matrix_provider,
             )
-            bar.update(1)
+        )
+        result_queue.put(("ok", row))
+    except Exception as exc:
+        result_queue.put(("error", str(exc)))
+
+
+def _run_case_hard_timeout(
+    *,
+    variant: Variant,
+    scenario: Scenario,
+    mode: str,
+    timeout_seconds: float,
+    astar_timeout_seconds: float | None,
+    matrix_provider: MatrixProvider,
+) -> Row:
+    context = mp.get_context("spawn")
+    result_queue: mp.Queue = context.Queue(maxsize=1)
+    started_event = context.Event()
+    process = context.Process(
+        target=_case_worker_entry,
+        kwargs={
+            "result_queue": result_queue,
+            "started_event": started_event,
+            "variant": variant,
+            "scenario": scenario,
+            "mode": mode,
+            "timeout_seconds": timeout_seconds,
+            "astar_timeout_seconds": astar_timeout_seconds,
+            "matrix_provider": matrix_provider,
+        },
+    )
+    try:
+        process.start()
+        if not started_event.wait(timeout=WORKER_STARTUP_GRACE_SECONDS):
+            if process.is_alive():
+                process.terminate()
+                process.join(1.0)
+                if process.is_alive():
+                    process.kill()
+                    process.join(1.0)
+            return row_error(
+                variant=variant,
+                scenario=scenario,
+                mode=mode,
+                status="failed",
+                error="worker failed to start case execution",
+            )
+
+        process.join(timeout_seconds)
+        if process.is_alive():
+            process.terminate()
+            process.join(1.0)
+            if process.is_alive():
+                process.kill()
+                process.join(1.0)
+            return row_error(
+                variant=variant,
+                scenario=scenario,
+                mode=mode,
+                status="timeout",
+                error=f"case timed out after {timeout_seconds:.1f}s (hard kill)",
+            )
+
+        payload: tuple[str, object] | None = None
+        try:
+            payload = result_queue.get_nowait()
+        except queue.Empty:
+            payload = None
+
+        if payload is None:
+            return row_error(
+                variant=variant,
+                scenario=scenario,
+                mode=mode,
+                status="failed",
+                error=f"worker exited with code {process.exitcode}",
+            )
+
+        kind, value = payload
+        if kind == "ok":
+            return value  # type: ignore[return-value]
+        return row_error(
+            variant=variant,
+            scenario=scenario,
+            mode=mode,
+            status="failed",
+            error=str(value),
+        )
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
 
 
 async def run_case(
@@ -131,66 +242,32 @@ async def run_suite(
     rows: list[Row] = []
     total = len(scenarios) * len(variants)
     bar = tqdm(total=total, desc=desc, unit="run", leave=False)
+    suite_timeout_warned = False
     started = time.monotonic()
-    for s_idx, scenario in enumerate(scenarios):
+    for scenario in scenarios:
         bar.set_description(f"{desc}:n={scenario.n_attractions}")
-        if (
-            suite_timeout_seconds is not None
-            and time.monotonic() - started >= suite_timeout_seconds
-        ):
-            _append_suite_timeout_skips(
-                rows=rows,
-                scenarios=scenarios,
-                variants=variants,
-                mode=mode,
-                start_scenario_idx=s_idx,
-                start_variant_idx=0,
-                suite_timeout_seconds=suite_timeout_seconds,
-                bar=bar,
-            )
-            break
-        try:
-            async with matrix_provider.acquire(scenario) as matrices:
-                for v_idx, variant in enumerate(variants):
-                    if (
-                        suite_timeout_seconds is not None
-                        and time.monotonic() - started >= suite_timeout_seconds
-                    ):
-                        _append_suite_timeout_skips(
-                            rows=rows,
-                            scenarios=scenarios,
-                            variants=variants,
-                            mode=mode,
-                            start_scenario_idx=s_idx,
-                            start_variant_idx=v_idx,
-                            suite_timeout_seconds=suite_timeout_seconds,
-                            bar=bar,
-                        )
-                        bar.close()
-                        return rows
-                    rows.append(
-                        await run_case(
-                            variant=variant,
-                            scenario=scenario,
-                            mode=mode,
-                            timeout_seconds=timeout_seconds,
-                            astar_timeout_seconds=astar_timeout_seconds,
-                            matrices=matrices,
-                        )
-                    )
-                    bar.update(1)
-        except Exception as exc:
-            status = status_from_error(exc)
-            for variant in variants:
-                rows.append(
-                    row_error(
-                        variant=variant,
-                        scenario=scenario,
-                        mode=mode,
-                        status=status,
-                        error=str(exc),
-                    )
+        for variant in variants:
+            if (
+                suite_timeout_seconds is not None
+                and not suite_timeout_warned
+                and time.monotonic() - started >= suite_timeout_seconds
+            ):
+                print(
+                    f"[SUITE-TIMEOUT-SOFT] {desc} exceeded {suite_timeout_seconds:.1f}s; continuing per-case timeouts."
                 )
-                bar.update(1)
+                suite_timeout_warned = True
+
+            rows.append(
+                await asyncio.to_thread(
+                    _run_case_hard_timeout,
+                    variant=variant,
+                    scenario=scenario,
+                    mode=mode,
+                    timeout_seconds=timeout_seconds,
+                    astar_timeout_seconds=astar_timeout_seconds,
+                    matrix_provider=matrix_provider,
+                )
+            )
+            bar.update(1)
     bar.close()
     return rows
