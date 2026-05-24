@@ -189,6 +189,9 @@
           </li>
         </ol>
         <p class="text-sm text-muted mt-2">Trasa została zaktualizowana na mapie.</p>
+        <button type="button" class="btn btn-secondary mt-3" @click="store.clearRouteResult()">
+          <Pencil class="icon-sm" /> Modyfikuj trasę
+        </button>
       </section>
     </aside>
 
@@ -321,7 +324,7 @@ import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup } from '@vue-lea
 import {
   Map as MapIcon, MapPin, Clock, Flag, Calendar,
   Plus, Trash2, Navigation, Settings,
-  List, CheckCircle2, MapPinPlus
+  List, CheckCircle2, MapPinPlus, Pencil
 } from 'lucide-vue-next'
 import { parseOpeningHoursForDay, minutesToTimeString } from './utils/time.js'
 

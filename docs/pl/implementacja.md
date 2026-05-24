@@ -33,9 +33,40 @@ Przepływ zgodny z [[algorytm]]:
 4. Dla każdego kandydata: dojazd, ewentualne czekanie na otwarcie, wybór czasu pobytu, aktualizacja kosztu (dystans pieszy + niewykorzystany czas pobytu).
 5. Heurystyka oparta na minimalnym drzewie spinającym pozostałe atrakcje; powtarzające się podproblemy są pomijane, jeśli już znaleziono tańszy stan.
 
-Sukces: wszystkie atrakcje odwiedzone w kolejności zwróconej przez API. Brak rozwiązania: komunikat błędu dla użytkownika.
+Sukces: wszystkie atrakcje odwiedzone w kolejności zwróconej przez API. Brak rozwiązania: komunikat błędu dla użytkownika (patrz sekcja API).
 
-Backend udostępnia wynik optymalizacji przez API; frontend wysyła listę atrakcji i godziny, a w odpowiedzi dostaje kolejność wizyt, czasy i dane do narysowania trasy na mapie.
+## API HTTP
+
+Schematy Pydantic i interaktywna dokumentacja: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) (Swagger FastAPI, gdy działa `just dev-server`).
+
+### GET `/places`
+
+Zwraca listę atrakcji z `backend/data/places.json` (generowana skryptem `just extract-places` w katalogu `backend/`).
+
+Przykładowy element:
+
+```json
+{
+  "id": 0,
+  "name": "Helsinki Central Park",
+  "lat": 60.237373,
+  "lng": 24.920478,
+  "hours": [
+    { "day": 1, "label": "Monday", "time": "Open 24 hours" }
+  ]
+}
+```
+
+| Status | Odpowiedź |
+|--------|-----------|
+| 200 | tablica miejsc |
+| 503 | brak `places.json` — uruchom `just extract-places` |
+
+### POST `/trip/optimize`
+
+Optymalizacja kolejności odwiedzin. **Wszystkie czasy w minutach od północy** (np. 540 = 09:00). Współrzędne: `lat`, `lon`.
+
+**Walidacja wejścia** (FastAPI/Pydantic): HTTP 422, `detail` jako lista pól — np. brak wymaganego pola, zły typ.
 
 ## Jednostki i wydajność
 

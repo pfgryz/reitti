@@ -34,9 +34,9 @@ Użytkownik wchodzi pod jeden adres (np. `http://127.0.0.1:8000/app/`). Backend 
 
 ## Frontend
 
-Warstwa widoczna dla użytkownika jest napisana w **Vue.js**. Pokazuje mapę, formularz wycieczki (start, godziny, atrakcje z czasem pobytu) oraz wynik na mapie.
+Warstwa widoczna dla użytkownika jest napisana w **Vue.js** (Pinia). Pokazuje mapę, formularz wycieczki (start, godziny, dzień tygodnia, atrakcje z czasem pobytu) oraz wynik na mapie.
 
-Po kliknięciu przycisku wyznaczenia trasy interfejs przekazuje dane do serwera i pokazuje kolejność odwiedzin oraz trasę na mapie. Instalacja: [[instrukcja]].
+Lista miejsc do wyboru pochodzi z **`GET /places`**. Optymalizacja: **`POST /trip/optimize`** z punktem startowym jako `attractions[0]` i geometrią odcinków (`include_legs`). Kontrakt HTTP: [[implementacja]]. Instalacja: [[instrukcja]].
 
 ## Backend
 

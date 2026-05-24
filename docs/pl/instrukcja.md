@@ -41,12 +41,20 @@ Wykonaj polecenia w katalogu głównym repozytorium (kolejność ma znaczenie).
    just frontend-build
    ```
 
-6. **Uruchomienie aplikacji** - z katalogu `backend/`:
+6. **Miejsca na mapie** (opcjonalnie, jeśli brak `backend/data/places.json`) — z katalogu `backend/`:
+   ```sh
+   just extract-places
+   ```
+   Wymaga `data/raw/hsl.osm.pbf` z kroku 1.
+
+7. **Uruchomienie aplikacji** - z katalogu `backend/`:
    ```sh
    just dev-server
    ```
 
-7. Otwórz w przeglądarce: [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/)
+8. Otwórz w przeglądarce: [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/)
+
+   Dokumentacja API (OpenAPI): [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Szczegóły kontraktu: [[implementacja]].
 
 ## Uruchomienie
 
