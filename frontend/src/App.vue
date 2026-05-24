@@ -142,8 +142,8 @@
         <p class="text-sm"><strong>Czas wycieczki:</strong> {{ store.totalDuration }}</p>
         <h4 class="results-subtitle">Kolejność odwiedzin</h4>
         <ol class="visit-order-list">
-          <li v-for="(visit, index) in store.visitOrder" :key="index" class="visit-order-item">
-            <strong>{{ visit.name }}</strong>
+          <li v-for="visit in store.visitOrder" :key="visit.order" class="visit-order-item">
+            <strong>{{ visit.order }}. {{ visit.name }}</strong>
             <span class="text-sm text-muted">
               {{ visit.arrival }} – {{ visit.departure }}, pobyt {{ visit.stay }} min
             </span>
@@ -161,6 +161,7 @@
           v-for="place in availablePlaces"
           :key="'avail-' + place.id"
           :lat-lng="[place.lat, place.lng]"
+          :icon="iconPlace"
         >
           <l-tooltip>Dostępne: {{ place.name }}</l-tooltip>
           <l-popup>
@@ -178,12 +179,11 @@
           </l-popup>
         </l-marker>
 
-        <l-marker v-if="store.startPoint && store.startPoint.lat" :lat-lng="[store.startPoint.lat, store.startPoint.lng]">
-          <l-icon
-            icon-url="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png"
-            shadow-url="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png"
-            :icon-size="[25, 41]" :icon-anchor="[12, 41]" :popup-anchor="[1, -34]" :shadow-size="[41, 41]"
-          />
+        <l-marker
+          v-if="!store.isRouteCalculated && store.startPoint?.lat"
+          :lat-lng="[store.startPoint.lat, store.startPoint.lng]"
+          :icon="pinIcon(1, '#16a34a', '#16a34a')"
+        >
           <l-tooltip>Start: {{ store.startPoint.name }}</l-tooltip>
           <l-popup>
             <div class="map-popup">
@@ -200,12 +200,13 @@
           </l-popup>
         </l-marker>
 
-        <l-marker v-for="item in store.attractions" :key="'selected-' + item.id" :lat-lng="[item.lat, item.lng]">
-          <l-icon
-            icon-url="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png"
-            shadow-url="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png"
-            :icon-size="[25, 41]" :icon-anchor="[12, 41]" :popup-anchor="[1, -34]" :shadow-size="[41, 41]"
-          />
+        <l-marker
+          v-for="(item, index) in store.attractions"
+          v-show="!store.isRouteCalculated"
+          :key="'selected-' + item.id"
+          :lat-lng="[item.lat, item.lng]"
+          :icon="pinIcon(index + 2)"
+        >
           <l-tooltip>Wybrane: {{ item.name }}</l-tooltip>
           <l-popup>
             <div class="map-popup">
@@ -222,16 +223,43 @@
           </l-popup>
         </l-marker>
 
-        <l-marker v-if="previewPlace" :lat-lng="[previewPlace.lat, previewPlace.lng]" :opacity="0.5">
+        <l-marker
+          v-if="previewPlace"
+          :lat-lng="[previewPlace.lat, previewPlace.lng]"
+          :icon="iconPreview"
+          :opacity="0.6"
+        >
           <l-tooltip>Podgląd: {{ previewPlace.name }}</l-tooltip>
         </l-marker>
 
-        <l-polyline
-          v-if="store.routePolyline.length"
-          :lat-lngs="store.routePolyline"
-          color="#3b82f6"
-          :weight="5"
-        ></l-polyline>
+        <template v-if="store.isRouteCalculated">
+          <l-polyline
+            v-for="(segment, index) in store.routeSegments"
+            v-show="segment.points?.length >= 2"
+            :key="`${index}-${segment.mode}`"
+            :lat-lngs="segment.points"
+            :color="segment.mode === 'public_transport' ? '#ea580c' : '#3b82f6'"
+            :weight="5"
+          />
+          <l-marker
+            v-for="stop in routeStops"
+            :key="'stop-' + stop.order"
+            :lat-lng="[stop.lat, stop.lng]"
+            :icon="pinIcon(stop.order, stop.order === 1 ? '#16a34a' : '#2563eb', stop.order === 1 ? '#16a34a' : '#1e40af')"
+          >
+            <l-tooltip>{{ stop.order }}. {{ stop.name }}</l-tooltip>
+          </l-marker>
+          <template v-for="(segment, index) in store.routeSegments" :key="'bus-' + index">
+            <template v-if="segment.bus">
+              <l-marker :lat-lng="segment.bus.from" :icon="iconBus">
+                <l-tooltip>{{ segment.bus.fromName || 'Przystanek początkowy' }}</l-tooltip>
+              </l-marker>
+              <l-marker :lat-lng="segment.bus.to" :icon="iconBus">
+                <l-tooltip>{{ segment.bus.toName || 'Przystanek końcowy' }}</l-tooltip>
+              </l-marker>
+            </template>
+          </template>
+        </template>
       </l-map>
     </main>
   </div>
@@ -240,9 +268,11 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useRouteStore } from '../stores/routeStore'
+import MapMarker from './components/MapMarker.vue'
+import { leafletIcon } from './leafletIcon.js'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup, LIcon } from '@vue-leaflet/vue-leaflet'
+import { LMap, LTileLayer, LMarker, LTooltip, LPolyline, LPopup } from '@vue-leaflet/vue-leaflet'
 
 import {
   Map as MapIcon, MapPin, Clock, Flag, Calendar,
@@ -262,14 +292,36 @@ const weekdays = [
 
 const store = useRouteStore()
 
+const pinIcon = (n, color = '#2563eb', badge = '#1e40af') =>
+  leafletIcon(MapMarker, { n, color, badge }, [32, 40], [16, 36])
+const iconPlace = leafletIcon(MapMarker, { color: '#64748b' }, [28, 36], [14, 32])
+const iconPreview = leafletIcon(MapMarker, { color: '#94a3b8' }, [24, 32], [12, 28])
+const iconBus = leafletIcon(MapMarker, { kind: 'bus' }, [36, 36], [18, 18])
+
 const selectedDayLabel = computed(() =>
   weekdays.find(d => d.day === store.visitDay)?.label ?? ''
 )
 const map = ref(null)
 
+const routeStops = computed(() => {
+  if (!store.isRouteCalculated) return []
+  const stops = [{
+    order: 1,
+    name: store.startPoint.name,
+    lat: store.startPoint.lat,
+    lng: store.startPoint.lng
+  }]
+  for (const visit of store.visitOrder) {
+    if (visit.lat == null || visit.lng == null) continue
+    stops.push({ order: stops.length + 1, name: visit.name, lat: visit.lat, lng: visit.lng })
+  }
+  return stops
+})
+
 watch(
-  () => store.routePolyline,
-  async (points) => {
+  () => store.routeSegments,
+  async (segments) => {
+    const points = segments.flatMap(segment => segment.points)
     if (!points.length) return
     await nextTick()
     const leafletMap = map.value?.leafletObject
@@ -591,5 +643,10 @@ label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; font-w
   background-color: var(--primary);
   color: white;
   font-weight: 600;
+}
+
+:deep(.leaflet-map-marker) {
+  background: transparent;
+  border: none;
 }
 </style>
