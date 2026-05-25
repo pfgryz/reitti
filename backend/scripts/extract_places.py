@@ -246,6 +246,34 @@ def resolve_hours(tags: dict) -> list[dict]:
     return open24h_hours()
 
 
+def resolves_to_open24h(tags: dict) -> bool:
+    raw = tags.get("opening_hours")
+    if not raw:
+        return True
+    parsed = parse_opening_hours(raw)
+    if not parsed:
+        return True
+    return all(h["time"] == TIME_OPEN_24H for h in parsed)
+
+
+def max_open24h_slots(count: int) -> int:
+    return count // 4 if count > 0 else 0
+
+
+def pick_candidate(
+    pool: list[Candidate], open24h_used: int, max_open24h: int
+) -> Candidate:
+    if open24h_used >= max_open24h:
+        restricted = [c for c in pool if not resolves_to_open24h(c.tags)]
+        if restricted:
+            pool = restricted
+    else:
+        with_hours = [c for c in pool if not resolves_to_open24h(c.tags)]
+        if with_hours:
+            pool = with_hours
+    return max(pool, key=lambda c: c.score)
+
+
 def load_candidates(pbf: Path) -> list[Candidate]:
     node_pos: dict[int, tuple[float, float]] = {}
     pbf_path = str(pbf)
@@ -309,6 +337,15 @@ def select_spread(candidates: list[Candidate], count: int) -> list[Candidate]:
     s, w, n, e = BBOX
     chosen: list[Candidate] = []
     used: set[tuple[int, int]] = set()
+    max_open24h = max_open24h_slots(count)
+    open24h_used = 0
+
+    def add_pick(pick: Candidate) -> None:
+        nonlocal open24h_used
+        chosen.append(pick)
+        used.add((round(pick.lat, 3), round(pick.lon, 3)))
+        if resolves_to_open24h(pick.tags):
+            open24h_used += 1
 
     for ri in range(GRID_ROWS):
         for ci in range(GRID_COLS):
@@ -327,20 +364,26 @@ def select_spread(candidates: list[Candidate], count: int) -> list[Candidate]:
             ]
             if not in_cell:
                 continue
-            pick = max(in_cell, key=lambda c: c.score)
-            chosen.append(pick)
-            used.add((round(pick.lat, 3), round(pick.lon, 3)))
+            add_pick(pick_candidate(in_cell, open24h_used, max_open24h))
 
-    rest = sorted(
-        [c for c in candidates if (round(c.lat, 3), round(c.lon, 3)) not in used],
-        key=lambda c: c.score,
-        reverse=True,
-    )
-    for c in rest:
-        if len(chosen) >= count:
+    remaining = [
+        c
+        for c in candidates
+        if (round(c.lat, 3), round(c.lon, 3)) not in used
+    ]
+    while len(chosen) < count and remaining:
+        if open24h_used >= max_open24h and all(
+            resolves_to_open24h(c.tags) for c in remaining
+        ):
             break
-        chosen.append(c)
-        used.add((round(c.lat, 3), round(c.lon, 3)))
+        pick = pick_candidate(remaining, open24h_used, max_open24h)
+        add_pick(pick)
+        remaining = [
+            c
+            for c in remaining
+            if (round(c.lat, 3), round(c.lon, 3))
+            != (round(pick.lat, 3), round(pick.lon, 3))
+        ]
 
     return chosen[:count]
 
