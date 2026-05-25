@@ -11,7 +11,9 @@ import osmium
 from tqdm import tqdm
 
 OUT = Path(__file__).resolve().parent.parent / "data" / "places.json"
-DEFAULT_PBF = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "hsl.osm.pbf"
+DEFAULT_PBF = (
+    Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "hsl.osm.pbf"
+)
 BBOX = (60.13, 24.90, 60.30, 25.06)
 DEFAULT_COUNT = 50
 GRID_ROWS, GRID_COLS = 7, 8
@@ -23,24 +25,64 @@ HARDCODED_STATION = {
 }
 
 DAYS = [
-    (1, "Monday"), (2, "Tuesday"), (3, "Wednesday"), (4, "Thursday"),
-    (5, "Friday"), (6, "Saturday"), (0, "Sunday"),
+    (1, "Poniedziałek"),
+    (2, "Wtorek"),
+    (3, "Środa"),
+    (4, "Czwartek"),
+    (5, "Piątek"),
+    (6, "Sobota"),
+    (0, "Niedziela"),
 ]
+TIME_OPEN_24H = "Otwarte całą dobę"
+TIME_CLOSED = "Zamknięte"
 DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 DAY_CODES = {"mo": 1, "tu": 2, "we": 3, "th": 4, "fr": 5, "sa": 6, "su": 0}
 MONTH_CODES = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 SEASON_PREFIX = re.compile(r"^[A-Za-z]{3}-[A-Za-z]{3}:\s*")
 
-TOURISM_GOOD = {"museum", "attraction", "gallery", "theme_park", "zoo", "aquarium", "viewpoint"}
+TOURISM_GOOD = {
+    "museum",
+    "attraction",
+    "gallery",
+    "theme_park",
+    "zoo",
+    "aquarium",
+    "viewpoint",
+}
 TOURISM_SKIP = {"information", "artwork", "board", "camp_site", "yes", "picnic_site"}
 HISTORIC_GOOD = {
-    "castle", "cathedral", "church", "fortress", "monument", "building",
-    "ruins", "archaeological_site", "manor", "city_gate",
+    "castle",
+    "cathedral",
+    "church",
+    "fortress",
+    "monument",
+    "building",
+    "ruins",
+    "archaeological_site",
+    "manor",
+    "city_gate",
 }
-HISTORIC_SKIP = {"memorial", "memorial_plaque", "boundary_stone", "stone", "tomb", "wayside_cross"}
+HISTORIC_SKIP = {
+    "memorial",
+    "memorial_plaque",
+    "boundary_stone",
+    "stone",
+    "tomb",
+    "wayside_cross",
+}
 
 
 @dataclass
@@ -102,7 +144,7 @@ def poi_score(tags: dict) -> int:
 
 
 def open24h_hours() -> list[dict]:
-    return [{"day": d, "label": label, "time": "Open 24 hours"} for d, label in DAYS]
+    return [{"day": d, "label": label, "time": TIME_OPEN_24H} for d, label in DAYS]
 
 
 def expand_days(spec: str) -> list[int]:
@@ -143,7 +185,7 @@ def apply_time_rule(slots: dict[int, str], rule: str) -> bool:
     rule = strip_season(rule)
     if re.fullmatch(r"[A-Za-z\-]+\s+closed", rule, re.I):
         for d in expand_days(rule.split()[0]):
-            slots[d] = "Closed"
+            slots[d] = TIME_CLOSED
         return True
     m = re.match(
         r"(?:(?P<days>[A-Za-z\-]+)\s+)?(?P<open>\d{1,2}:\d{2})\s*-\s*(?P<close>\d{1,2}:\d{2})",
@@ -169,7 +211,7 @@ def parse_opening_hours(raw: str, month: int | None = None) -> list[dict] | None
         return open24h_hours()
 
     month = month or date.today().month
-    slots = {d: "Closed" for d, _ in DAYS}
+    slots = {d: TIME_CLOSED for d, _ in DAYS}
     applied = False
 
     for rule in raw.split(";"):
@@ -209,6 +251,7 @@ def load_candidates(pbf: Path) -> list[Candidate]:
     pbf_path = str(pbf)
 
     with tqdm(desc="Pass 1: index nodes", unit=" nodes", dynamic_ncols=True) as bar:
+
         class Pass1(osmium.SimpleHandler):
             def node(self, n):
                 bar.update(1)
@@ -220,6 +263,7 @@ def load_candidates(pbf: Path) -> list[Candidate]:
     raw: list[Candidate] = []
 
     with tqdm(desc="Pass 2: scan POI", unit=" objs", dynamic_ncols=True) as bar:
+
         class Pass2(osmium.SimpleHandler):
             def node(self, n):
                 bar.update(1)
@@ -275,7 +319,8 @@ def select_spread(candidates: list[Candidate], count: int) -> list[Candidate]:
             lon_lo = w + (e - w) * ci / GRID_COLS
             lon_hi = w + (e - w) * (ci + 1) / GRID_COLS
             in_cell = [
-                c for c in candidates
+                c
+                for c in candidates
                 if (round(c.lat, 3), round(c.lon, 3)) not in used
                 and lat_lo <= c.lat < lat_hi
                 and lon_lo <= c.lon < lon_hi
@@ -308,9 +353,12 @@ def near_station(lat: float, lon: float) -> bool:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract POIs from OSM PBF into places.json")
+    parser = argparse.ArgumentParser(
+        description="Extract POIs from OSM PBF into places.json"
+    )
     parser.add_argument(
-        "-n", "--count",
+        "-n",
+        "--count",
         type=int,
         default=DEFAULT_COUNT,
         help=f"how many POIs to pick from the map (default: {DEFAULT_COUNT})",
@@ -364,7 +412,9 @@ def main() -> int:
         result.append(entry)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    OUT.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"wrote {len(result)} places from {pbf} -> {OUT}")
     return 0 if result else 1
 
